@@ -22,6 +22,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir={#SourcePath}/../../dist
 OutputBaseFilename=lexpdf-setup
+LicenseFile={#SourcePath}/../../LICENSE
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

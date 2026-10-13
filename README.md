@@ -76,4 +76,4 @@ En runtime LT se busca en: `$LT_HOME` → junto al exe → `CARGO_MANIFEST_DIR/a
 
 ## Licencia
 
-MIT — ver `LICENSE`. PDFium: BSD + third-party en `assets/pdfium/licenses/`. Binarios LT: LGPL (LanguageTool).
+GPL-3.0-only — ver `LICENSE` (la exige Slint, enlazado estático). `pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`. Binarios LT: LGPL como sidecar aparte (LanguageTool).
