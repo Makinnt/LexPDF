@@ -112,10 +112,17 @@ jobs:
           Copy-Item target/release/lexpdf.exe dist/windows/
           Copy-Item assets/pdfium/pdfium.dll dist/windows/
           Copy-Item assets/lt dist/windows/lt -Recurse -Force
+      - name: Versión desde el tag (sin la v)
+        id: ver
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}' -replace '^v', ''
+          "VER=$v" >> $env:GITHUB_OUTPUT
       - name: Compila instalador
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: installer/windows/lexpdf.iss
+          options: /DMyAppVersion=${{ steps.ver.outputs.VER }}
 
       - name: Smoke test (JRE + LT real)
         shell: pwsh

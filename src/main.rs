@@ -50,6 +50,7 @@ struct State {
     lt_ready: bool, // sidecar LanguageTool respondiendo en localhost:8081
     lt_dead: bool,  // LT no va a arrancar (sin java): el scan avanza sin sintaxis
     pending: u32, // hilos HTTP en vuelo (la barra sigue hasta que vuelven)
+    jobs_total: u32, // hilos lanzados en este scan (tramo 50→100 de la barra)
     sec_bytes: u64, // texto enviado al motor (métrica: siempre loopback)
     syn_received: bool, // llegó al menos un Syn (si no, "LT no devolvió ninguno")
     lt_child: Option<std::process::Child>, // hijo java propio
@@ -470,6 +471,7 @@ fn start_scan(ui: &AppWindow, st: &mut State) {
     st.scan_queue = (st.page..total).chain(0..st.page).collect();
     st.scan_pos = 0;
     st.pending = 0;
+    st.jobs_total = 0;
     st.sec_bytes = 0;
     st.last_lang = ui.get_lang_idx();
     ui.set_errors(ModelRc::new(VecModel::from_slice(&[])));
@@ -490,8 +492,9 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
             return false;
         }
         if !s.lt_ready && !s.lt_dead {
-            // motor arrancando (carga diccionarios, lento en Windows): barra visible
+            // motor arrancando: barrido indeterminado de izq. a der. en bucle
             ui.set_scanning(true);
+            ui.set_scan_progress((ui.get_scan_progress() + 15) % 100);
             ui.set_scan_text("Cargando diccionarios…".into());
             return false;
         }
@@ -530,6 +533,7 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     let launched = !jobs.is_empty();
     if launched {
         st.borrow_mut().pending += jobs.len() as u32;
+        st.borrow_mut().jobs_total += jobs.len() as u32;
         st.borrow_mut().sec_bytes += jobs.iter().map(|(w, _, _, _, _)| w.iter().map(|x| x.text.len() as u64).sum::<u64>()).sum::<u64>();
     }
     for (words, pg, mode, gen, tx) in jobs {
@@ -545,10 +549,10 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     false
 }
 
-/// Barra única: páginas extraídas de la cola (los hits LT llegan async).
+/// Barra única en dos tramos reales: 0→50 extrayendo, 50→100 respondiendo.
 fn refresh_progress(ui: &AppWindow, s: &State) {
     let (len, done) = (s.scan_queue.len() as u32, s.scan_pos.min(s.scan_queue.len()) as u32);
-    let (pct, finished) = progress_state(len, done, s.pending);
+    let (pct, finished) = progress_state(len, done, s.jobs_total, s.pending);
     ui.set_scan_progress(pct as i32);
     if finished {
         ui.set_scanning(false);
@@ -560,9 +564,21 @@ fn refresh_progress(ui: &AppWindow, s: &State) {
 
 /// (porcentaje, terminada): terminada solo con cola vacía Y sin hilos en vuelo.
 /// Pura para poder testearla sin UI.
-fn progress_state(len: u32, done: u32, pending: u32) -> (u32, bool) {
-    let pct = if len == 0 { 100 } else { done.min(len) * 100 / len };
-    (pct, len > 0 && done >= len && pending == 0)
+fn progress_state(len: u32, done: u32, jobs: u32, pending: u32) -> (u32, bool) {
+    if len == 0 {
+        return (100, false);
+    }
+    let done = done.min(len);
+    if done < len {
+        return (done * 50 / len, false); // tramo extracción
+    }
+    if pending == 0 {
+        return (100, true);
+    }
+    if jobs == 0 {
+        return (100, true);
+    }
+    (50 + (jobs - pending) * 50 / jobs, false) // tramo respuestas
 }
 
 /// Agrupa chars de Pdfium en palabras con su bounding box unión.
@@ -1071,7 +1087,7 @@ fn main() -> anyhow::Result<()> {
         zoom: 0.5,
         free_pt: None,
         lt_ready: false,
-        pending: 0, sec_bytes: 0,
+        pending: 0, jobs_total: 0, sec_bytes: 0,
         syn_received: false,
         lt_dead: false,
         lt_child: None,
@@ -1713,9 +1729,10 @@ mod tests {
     }
     #[test]
     fn progress_waits_for_threads() {
-        assert_eq!(progress_state(10, 3, 0), (30, false));
-        assert_eq!(progress_state(10, 10, 2), (100, false)); // cola vacía, hilos en vuelo: sigue
-        assert_eq!(progress_state(10, 10, 0), (100, true));
+        assert_eq!(progress_state(10, 3, 0, 0), (15, false)); // extracción: mitad del tramo
+        assert_eq!(progress_state(10, 10, 4, 2), (75, false)); // 2 de 4 respuestas
+        assert_eq!(progress_state(10, 10, 4, 0), (100, true));
+        assert_eq!(progress_state(10, 10, 0, 0), (100, true)); // sin motor: cierra
     }
     #[test]
     fn only_pdfs_pass() {
@@ -1815,7 +1832,7 @@ mod tests {
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 0.5, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, sec_bytes: 0,
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 0.5, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0,
         syn_received: false, lt_child: None,
         };
         annotate(&st, 0, "nota redonda").unwrap();
@@ -1833,7 +1850,7 @@ mod tests {
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedio".into() }],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 1.0, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, sec_bytes: 0,
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 1.0, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0,
         syn_received: false, lt_child: None,
         };
         let out = annotate(&st, 0, "nota de prueba").unwrap();

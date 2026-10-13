@@ -5,7 +5,10 @@
 ; La firma la pone SignPath en CI (ver README.md de esta carpeta).
 
 #define MyAppName "LexPDF"
-#define MyAppVersion "0.1.0"
+#define MyAppName "LexPDF"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.2"
+#endif
 #define MyAppPublisher "LexiSec"
 #define StageDir SourcePath + "/../../dist/windows"
 
