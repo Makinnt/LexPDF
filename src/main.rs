@@ -51,6 +51,8 @@ struct State {
     lt_dead: bool,  // LT no va a arrancar (sin java): el scan avanza sin sintaxis
     pending: u32, // hilos HTTP en vuelo (la barra sigue hasta que vuelven)
     jobs_total: u32, // hilos lanzados en este scan (tramo 50→100 de la barra)
+    scan_target: i32, // % objetivo (la barra visible lo persigue de 1 en 1)
+    scan_shown: i32, // % mostrado (persigue a target: avance por porcentaje)
     sec_bytes: u64, // texto enviado al motor (métrica: siempre loopback)
     syn_received: bool, // llegó al menos un Syn (si no, "LT no devolvió ninguno")
     lt_child: Option<std::process::Child>, // hijo java propio
@@ -472,6 +474,8 @@ fn start_scan(ui: &AppWindow, st: &mut State) {
     st.scan_pos = 0;
     st.pending = 0;
     st.jobs_total = 0;
+    st.scan_target = 0;
+    st.scan_shown = 0;
     st.sec_bytes = 0;
     st.last_lang = ui.get_lang_idx();
     ui.set_errors(ModelRc::new(VecModel::from_slice(&[])));
@@ -492,17 +496,22 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
             return false;
         }
         if !s.lt_ready && !s.lt_dead {
-            // motor arrancando: barrido indeterminado de izq. a der. en bucle
+            // motor arrancando: el objetivo barre en bucle, lo mostrado lo sigue de 1 en 1
+            let t = (s.scan_target + 15) % 100;
+            drop(s);
+            st.borrow_mut().scan_target = t;
             ui.set_scanning(true);
-            ui.set_scan_progress((ui.get_scan_progress() + 15) % 100);
             ui.set_scan_text("Cargando diccionarios…".into());
             return false;
         }
         if s.scan_pos >= s.scan_queue.len() {
-            // cola vacía pero hilos en vuelo: sigue la barra con pendientes
-            if s.pending > 0 {
+            // cola vacía pero hilos en vuelo: el objetivo sigue con las respuestas
+            let (pct, pend) = (progress_state(s.scan_queue.len() as u32, s.scan_queue.len() as u32, s.jobs_total, s.pending).0, s.pending);
+            drop(s);
+            if pend > 0 {
+                st.borrow_mut().scan_target = pct as i32;
                 ui.set_scanning(true);
-                ui.set_scan_text(format!("Revisando… {} pág. pendientes", s.pending).into());
+                ui.set_scan_text(format!("Revisando… {} pág. pendientes", pend).into());
             }
             return false;
         }
@@ -528,7 +537,7 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
                 jobs.push((words, i, mode, s.scan_id, s.tx.clone()));
             }
         }
-        refresh_progress(ui, &s);
+        refresh_progress(ui, &mut s);
     }
     let launched = !jobs.is_empty();
     if launched {
@@ -550,16 +559,26 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
 }
 
 /// Barra única en dos tramos reales: 0→50 extrayendo, 50→100 respondiendo.
-fn refresh_progress(ui: &AppWindow, s: &State) {
+/// Escribe el OBJETIVO en s.scan_target; lo mostrado lo persigue de 1 en 1 (ease_bar, en el Timer).
+fn refresh_progress(ui: &AppWindow, s: &mut State) {
     let (len, done) = (s.scan_queue.len() as u32, s.scan_pos.min(s.scan_queue.len()) as u32);
     let (pct, finished) = progress_state(len, done, s.jobs_total, s.pending);
-    ui.set_scan_progress(pct as i32);
+    s.scan_target = pct as i32;
     if finished {
+        s.scan_shown = pct as i32;
+        ui.set_scan_progress(pct as i32);
         ui.set_scanning(false);
         ui.set_scan_text("".into());
     } else {
-        ui.set_scan_text(format!("{pct}% · pág. {done} de {len}…").into());
+        // el % del texto es lo mostrado (va de 1 en 1 con la barra)
+        ui.set_scan_text(format!("{}% · pág. {done} de {len}…", s.scan_shown).into());
     }
+}
+
+/// Persigue el objetivo de 1 en 1 por tick: avance visible por porcentaje.
+/// Pura y testeable (el Timer la aplica).
+fn ease_step(shown: i32, target: i32) -> i32 {
+    shown + (target - shown).signum()
 }
 
 /// (porcentaje, terminada): terminada solo con cola vacía Y sin hilos en vuelo.
@@ -1060,6 +1079,7 @@ fn load_pdfium() -> Pdfium {
 
 fn main() -> anyhow::Result<()> {
     let ui = AppWindow::new()?;
+    ui.set_version(env!("CARGO_PKG_VERSION").into());
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
@@ -1087,7 +1107,7 @@ fn main() -> anyhow::Result<()> {
         zoom: 0.5,
         free_pt: None,
         lt_ready: false,
-        pending: 0, jobs_total: 0, sec_bytes: 0,
+        pending: 0, jobs_total: 0, sec_bytes: 0, scan_target: 0, scan_shown: 0,
         syn_received: false,
         lt_dead: false,
         lt_child: None,
@@ -1149,6 +1169,15 @@ fn main() -> anyhow::Result<()> {
             if scan_tick(&ui, &st) {
                 let pg = st.borrow().page;
                 show(&ui, &mut st.borrow_mut(), pg);
+            }
+            // la barra persigue el objetivo de 1 en 1 (suave por construcción)
+            {
+                let (shown, target) = (st.borrow().scan_shown, st.borrow().scan_target);
+                let next = ease_step(shown, target);
+                if next != shown {
+                    st.borrow_mut().scan_shown = next;
+                    ui.set_scan_progress(next);
+                }
             }
             // apaga el flash amarillo a los 5s
             let flash_out = st.borrow().flash.is_some_and(|(_, t)| t.elapsed() > std::time::Duration::from_secs(5));
@@ -1728,6 +1757,18 @@ mod tests {
         assert!(!boxes_overlap(&m(0, 0.0, 10.0), &m(1, 0.0, 10.0)));
     }
     #[test]
+    fn bar_eases_one_percent() {
+        assert_eq!(ease_step(0, 10), 1);
+        assert_eq!(ease_step(99, 100), 100);
+        assert_eq!(ease_step(50, 50), 50);
+        assert_eq!(ease_step(30, 0), 29);
+        let (mut s, t) = (0, 7); // converge sin pasarse
+        for _ in 0..20 {
+            s = ease_step(s, t);
+        }
+        assert_eq!(s, 7);
+    }
+    #[test]
     fn progress_waits_for_threads() {
         assert_eq!(progress_state(10, 3, 0, 0), (15, false)); // extracción: mitad del tramo
         assert_eq!(progress_state(10, 10, 4, 2), (75, false)); // 2 de 4 respuestas
@@ -1832,7 +1873,7 @@ mod tests {
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 0.5, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0,
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 0.5, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, scan_target: 0, scan_shown: 0,
         syn_received: false, lt_child: None,
         };
         annotate(&st, 0, "nota redonda").unwrap();
@@ -1850,7 +1891,7 @@ mod tests {
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedio".into() }],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 1.0, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0,
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 1.0, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, scan_target: 0, scan_shown: 0,
         syn_received: false, lt_child: None,
         };
         let out = annotate(&st, 0, "nota de prueba").unwrap();
