@@ -244,6 +244,7 @@ export component AppWindow inherits Window {
                     Rectangle {
                         x: 0;
                         width: parent.width * root.scan-progress / 100;
+                        animate width { duration: 250ms; easing: ease-out; }
                         background: #43a047; border-radius: 5px;
                     }
                 }
