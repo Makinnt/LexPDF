@@ -345,7 +345,7 @@ fn err_order(a: &Misspelling, b: &Misspelling) -> std::cmp::Ordering {
 }
 
 fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
-    let en = ui.get_lang_idx() == 2;
+    let en = ui.get_lang_idx() == 1;
     let (all, expanded) = {
         let s = st.borrow();
         (s.all_errs.clone(), s.expanded.clone())
@@ -515,7 +515,7 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     // sin LT solo queda esperar al sidecar; no se consume cola para no perder páginas.
     // Si LT murió (lt_dead), se consume igual para que la barra termine (lista vacía).
     let dead = st.borrow().lt_dead;
-    let mode = ui.get_lang_idx();
+    let mode = ui.get_lang_idx() + 1; // UI 0=ES,1=EN → LT 1=es,2=en
     let t = std::time::Instant::now();
     let mut jobs: Vec<(Vec<Word>, u32, i32, u64, Sender<SpellMsg>)> = vec![];
     {
@@ -1503,7 +1503,7 @@ fn main() -> anyhow::Result<()> {
                 };
                 (e.word.clone(), e.sug.clone(), s.view_group.get(i as usize).cloned().flatten())
             };
-            let en = ui.get_lang_idx() == 2;
+            let en = ui.get_lang_idx() == 1;
             let sugs = if sug.is_empty() { if en { "no suggestions".into() } else { "sin sugerencias".into() } } else { sug.join(", ") };
             let text = if en {
                 format!("Grammar observation: '{word}' -> {sugs}")
