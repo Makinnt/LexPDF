@@ -94,11 +94,24 @@ Flujos:
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
   24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
   de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
-- **Diálogo propio** (copia de trabajo / contraseña) en la barra lateral, arriba:
-  `dlg-open/dlg-kind/dlg-msg/dlg-pass` + callback `dlg-answer(bool)`. Va en la
-  sidebar, **no** como overlay: un `Rectangle` a pantalla completa dentro del
-  `Window` crea un bucle de layout (`root.layoutinfo-v`) que Slint marca como
-  deprecated y puede petar en runtime.
+- **Diálogo propio** (copia de trabajo / contraseña) **centrado con degradado**
+  sobre el resto: `dlg-open/dlg-kind/dlg-msg/dlg-pass` + `dlg-answer(bool)`.
+  Gotchas de Slint aprendidos aquí:
+  - El velo **no puede** ser un hijo directo del `Window` con `width: parent.width`:
+    Slint ve un bucle de layout (`root.layoutinfo-h`, "may panic at runtime") y
+    además reparte el espacio con el layout principal. Solución: un `Rectangle`
+    wrapper como **único hijo del root** (el velo va dentro, con posición
+    absoluta) y el tamaño del velo desde Rust (`win-w`/`win-h`), sin depender de
+    `parent.width`.
+  - El degradado es `@radial-gradient(circle, #000000b0, #00000040)`.
+- **GOTCHA `RefCell`**: un `RefMut` creado en el scrutinee de un `match` vive
+  hasta el final del `match`; si dentro de las ramas se vuelve a prestar, el
+  `RefCell` peta ("RefCell already borrowed") y la app se cae. Por eso existe
+  `with_state(c, f)`: presta, ejecuta y **suelta el préstamo antes de devolver**.
+  Todo lo que toque el estado dentro de un `match` va con él.
+- Si no hay copia de trabajo, el panel de nota **no se cierra** al reintentar
+  (el texto se conserva) y hay un botón "Crear copia de trabajo" en la barra
+  lateral para crearla cuando quieras.
 - `Flickable + VerticalLayout + for` para la lista (no `ListView` de std-widgets).
 - Cards: franja de color por gravedad + palabra + tipo/gravedad/pág +
   descripción ES/EN + sugerencias LT (`No hay sugerencias` si vacío) +

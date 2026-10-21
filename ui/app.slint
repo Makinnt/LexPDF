@@ -100,6 +100,9 @@ export component AppWindow inherits Window {
     title: "LexPDF";
     min-width: 900px;
     min-height: 600px;
+    init => { root.win-w = self.width; root.win-h = self.height; }
+    changed width => { root.win-w = self.width; }
+    changed height => { root.win-h = self.height; }
 
     in-out property <image> page-image;
     in-out property <string> page-label: "Sin documento";
@@ -111,6 +114,11 @@ export component AppWindow inherits Window {
     in-out property <[ErrRow]> errors;
     in-out property <[NoteRow]> page-notes;
     in-out property <int> note-total: 0;
+    in-out property <bool> has-working: true;
+    // tamaño real de la ventana (lo pone Rust): el velo del diálogo no puede
+    // depender de parent.width o Slint ve un bucle de layout en el root
+    in-out property <length> win-w: 0px;
+    in-out property <length> win-h: 0px;
     // diálogo modal propio: 0 = confirmar (Sí/No) · 1 = contraseña
     in-out property <int> dlg-kind: 0;
     in-out property <string> dlg-title: "";
@@ -163,6 +171,7 @@ export component AppWindow inherits Window {
     callback lang-set(int);
     callback theme-toggle();
     callback dlg-answer(bool);
+    callback make-working();
 
     // paleta según tema (fija, no depende del tema del SO)
     property <color> c-bg: root.is-dark ? #1e1e1e : white;
@@ -175,6 +184,10 @@ export component AppWindow inherits Window {
     property <color> c-accent: root.is-dark ? #e8e8e8 : #222;
     property <color> c-accent-fg: root.is-dark ? #111 : white;
 
+    // wrapper: único hijo del root. Así el velo del diálogo es un hijo más
+    // del contenedor (posición absoluta) y no reparte el espacio con el layout.
+    Rectangle {
+    width: 100%; height: 100%;
     HorizontalLayout {
         // Sidebar (400px como index.html)
         Rectangle {
@@ -206,44 +219,18 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // diálogo propio (copia de trabajo / contraseña): va arriba en la
-                // barra lateral para que se vea sin scroll.
-                if (root.dlg-open): Rectangle {
-                    background: root.c-card;
-                    border-color: root.c-accent; border-width: 1px; border-radius: 6px;
-                    VerticalLayout {
-                        padding: 10px; spacing: 6px;
-                        Text {
-                            text: root.dlg-title; font-size: 14px; font-weight: 700;
-                            color: root.c-fg; wrap: word-wrap;
-                        }
-                        Text { text: root.dlg-msg; font-size: 12px; color: root.c-dim; wrap: word-wrap; }
-                        if (root.dlg-kind == 1): Rectangle {
-                            height: 30px;
-                            background: root.c-pill; border-radius: 4px;
-                            TextInput {
-                                x: 8px; width: parent.width - 16px; height: parent.height;
-                                text <=> root.dlg-pass;
-                                font-size: 13px; color: root.c-fg;
-                                input-type: password;
-                                vertical-alignment: center;
-                                accepted => { root.dlg-answer(true); }
-                            }
-                        }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            MiniBtn {
-                                label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
-                                bg: root.c-pill; fg: root.c-fg;
-                                clicked => { root.dlg-answer(false); }
-                            }
-                            MiniBtn {
-                                label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
-                                bg: root.c-accent; fg: root.c-accent-fg;
-                                clicked => { root.dlg-answer(true); }
-                            }
-                        }
+                // sin copia de trabajo: se puede crear en cualquier momento
+                if (root.has-doc && !root.has-working): Rectangle {
+                    height: 28px;
+                    background: root.c-pill; border-radius: 4px;
+                    border-width: 1px; border-color: root.c-line;
+                    Text {
+                        text: "Crear copia de trabajo para guardar notas";
+                        color: root.c-fg; font-size: 11px;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
                     }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.make-working(); } }
                 }
 
                 // upload-section
@@ -634,6 +621,57 @@ export component AppWindow inherits Window {
                     Text { text: "✕"; color: root.c-accent-fg; font-size: 12px; vertical-alignment: center; }
                 }
                 TouchArea { width: parent.width; height: parent.height; clicked => { root.popup-dismiss(); } }
+            }
+        }
+    }
+
+        // diálogo modal centrado, con degradado sobre el resto de la app.
+        // el velo es un Rectangle (no TouchArea): los botones de abajo siguen siendo clicables.
+        Rectangle {
+            x: 0; y: 0;
+            width: root.win-w; height: root.win-h;
+            visible: root.dlg-open;
+            background: @radial-gradient(circle, #000000b0, #00000040);
+            Rectangle {
+                width: 440px;
+                height: root.dlg-kind == 1 ? 210px : 165px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: root.c-card;
+                border-color: root.c-line; border-width: 1px; border-radius: 10px;
+                VerticalLayout {
+                    padding: 16px; spacing: 10px;
+                    Text {
+                        text: root.dlg-title; font-size: 15px; font-weight: 700;
+                        color: root.c-fg; wrap: word-wrap;
+                    }
+                    Text { text: root.dlg-msg; font-size: 13px; color: root.c-dim; wrap: word-wrap; }
+                    if (root.dlg-kind == 1): Rectangle {
+                        height: 30px;
+                        background: root.c-pill; border-radius: 4px;
+                        TextInput {
+                            x: 8px; width: parent.width - 16px; height: parent.height;
+                            text <=> root.dlg-pass;
+                            font-size: 13px; color: root.c-fg;
+                            input-type: password;
+                            vertical-alignment: center;
+                            accepted => { root.dlg-answer(true); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        MiniBtn {
+                            label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
+                            bg: root.c-pill; fg: root.c-fg;
+                            clicked => { root.dlg-answer(false); }
+                        }
+                        MiniBtn {
+                            label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
+                            bg: root.c-accent; fg: root.c-accent-fg;
+                            clicked => { root.dlg-answer(true); }
+                        }
+                    }
+                }
             }
         }
     }

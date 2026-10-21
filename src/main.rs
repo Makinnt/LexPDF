@@ -404,6 +404,14 @@ fn syntax_page(words: &[Word], page: u32, mode: i32) -> Vec<Misspelling> {
     out
 }
 
+/// Presta el estado, ejecuta `f` y **suelta el préstamo antes de devolver**.
+/// Motivo: un `RefMut` creado en el scrutinee de un `match` vive hasta el
+/// final del `match`; si dentro de las ramas se vuelve a prestar, el
+/// `RefCell` peta ("RefCell already borrowed") y la app se cae.
+fn with_state<T, R>(c: &Rc<RefCell<T>>, f: impl FnOnce(&mut T) -> R) -> R {
+    f(&mut c.borrow_mut())
+}
+
 /// Toast de 4s para mensajes transitorios; el `status` queda para info persistente.
 fn notify(ui: &AppWindow, st: &Rc<RefCell<State>>, msg: String) {
     ui.set_popup_text(msg.into());
@@ -970,8 +978,10 @@ fn open_doc(ui: &AppWindow, st: &Rc<RefCell<State>>, path: PathBuf) {
         s.flash = None;
         s.free_pt = None;
     }
+    ui.set_has_working(st.borrow().working.is_some());
     let src = st.borrow().render_from().unwrap_or_else(|| path.clone());
-    match open_doc_file(&mut st.borrow_mut(), &src) {
+    let abierto = with_state(st, |s| open_doc_file(s, &src));
+    match abierto {
         Ok(()) => {}
         Err(e) if is_password_error(&e) => {
             // PDF protegido: se pide la contraseña (solo en memoria)
@@ -1030,17 +1040,26 @@ fn show_dlg(ui: &AppWindow, kind: i32, title: &str, msg: &str) {
 }
 
 /// Crea la copia de trabajo y reabre el documento desde ella.
-fn make_working(st: &Rc<RefCell<State>>) -> anyhow::Result<()> {
+fn make_working(ui: &AppWindow, st: &Rc<RefCell<State>>) -> anyhow::Result<()> {
     let out = create_working_copy(&mut st.borrow_mut())?;
     st.borrow_mut().working = Some(out);
     let src = st.borrow().render_from().context("sin documento")?;
     open_doc_file(&mut st.borrow_mut(), &src).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    ui.set_has_working(true);
     Ok(())
 }
 
+/// Resultado de intentar guardar una nota (decide si el panel se cierra).
+#[derive(PartialEq)]
+enum NoteResult {
+    Saved,   // guardada y visible
+    Pending, // hay un diálogo en marcha (falta la copia de trabajo)
+    Failed,  // error: se puede reintentar
+}
+
 /// Aplica una anotación y la deja visible al momento. Si no hay copia de
-/// trabajo, se pregunta antes de crearla.
-fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) {
+/// trabajo, se pregunta antes de crearla (y se devuelve `Pending`).
+fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> NoteResult {
     if st.borrow().working.is_none() {
         st.borrow_mut().dlg_pending = Some(Pending::CreateCopyThenNote(req));
         show_dlg(
@@ -1049,9 +1068,10 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) {
             "Copia de trabajo",
             "Para guardar la nota hace falta una copia \"_anotado.pdf\". El original no se toca. ¿Se crea?",
         );
-        return;
+        return NoteResult::Pending;
     }
-    match annotate_open(&mut st.borrow_mut(), &req) {
+    let res = with_state(st, |s| annotate_open(s, &req));
+    match res {
         Ok(added) => {
             st.borrow_mut().doc_notes.extend(added);
             let pg = st.borrow().page;
@@ -1060,8 +1080,12 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) {
             touch_history(&st.borrow());
             push_history(ui);
             notify(ui, st, "Nota guardada en la copia de trabajo".into());
+            NoteResult::Saved
         }
-        Err(e) => notify(ui, st, format!("Error al anotar: {e:#}")),
+        Err(e) => {
+            notify(ui, st, format!("Error al anotar: {e:#}"));
+            NoteResult::Failed
+        }
     }
 }
 
@@ -1562,11 +1586,19 @@ fn main() -> anyhow::Result<()> {
             let Some(ui) = ui_weak.upgrade() else { return };
             let text = ui.get_free_note_text().to_string();
             let pt = st.borrow().free_pt;
-            match pt {
+            let res = match pt {
                 Some((pg, x, y)) => apply_note(&ui, &st, AnnotateReq::AtPoint(pg, x, y, text)),
-                None => notify(&ui, &st, "Toca primero el punto del PDF".into()),
+                None => {
+                    notify(&ui, &st, "Toca primero el punto del PDF".into());
+                    NoteResult::Failed
+                }
+            };
+            // el panel solo se cierra si la nota quedó guardada: si no, el
+            // texto se pierde y el usuario tiene que reescribirla
+            if res == NoteResult::Saved {
+                ui.set_free_note_on(false);
+                st.borrow_mut().free_pt = None;
             }
-            ui.set_free_note_on(false);
         });
     }
     {
@@ -1726,8 +1758,11 @@ fn main() -> anyhow::Result<()> {
                 };
                 AnnotateReq::Error(gi, text)
             };
-            apply_note(&ui, &st, req);
-            ui.set_selected_note(-1);
+            let res = apply_note(&ui, &st, req);
+            // el editor se cierra solo si la nota se guardó (si no, se pierde)
+            if res == NoteResult::Saved {
+                ui.set_selected_note(-1);
+            }
         });
     }
     {
@@ -1767,8 +1802,7 @@ fn main() -> anyhow::Result<()> {
             };
             apply_note(&ui, &st, res);
         });
-    }
-    {
+    }    {
         let ui_weak = ui.as_weak();
         let st = st.clone();
         ui.on_dlg_answer(move |yes| {
@@ -1787,7 +1821,8 @@ fn main() -> anyhow::Result<()> {
                     }
                     st.borrow_mut().password = Some(leak_secret(&pass));
                     let src = st.borrow().render_from().unwrap_or_else(|| path.clone());
-                    match open_doc_file(&mut st.borrow_mut(), &src) {
+                    let abierto = with_state(&st, |s| open_doc_file(s, &src));
+                    match abierto {
                         Ok(()) => finish_open(&ui, &st, &path),
                         Err(e) if is_password_error(&e) => {
                             show_dlg(&ui, 1, "PDF con contraseña", "Contraseña incorrecta. Inténtalo otra vez.");
@@ -1801,7 +1836,7 @@ fn main() -> anyhow::Result<()> {
                         notify(&ui, &st, "Sin copia de trabajo no se pueden guardar notas".into());
                         return;
                     }
-                    match make_working(&st) {
+                    match make_working(&ui, &st) {
                         Ok(()) => {
                             let pg = st.borrow().page;
                             show(&ui, &mut st.borrow_mut(), pg);
@@ -1816,13 +1851,30 @@ fn main() -> anyhow::Result<()> {
                         notify(&ui, &st, "Sin copia de trabajo no se puede guardar la nota".into());
                         return;
                     }
-                    if let Err(e) = make_working(&st) {
+                    if let Err(e) = make_working(&ui, &st) {
                         notify(&ui, &st, format!("No se pudo crear la copia: {e:#}"));
                         return;
                     }
                     apply_note(&ui, &st, req);
                 }
                 None => {}
+            }
+        });
+    }
+    {
+        // botón persistente: crear la copia de trabajo cuando haga falta
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_make_working(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            match make_working(&ui, &st) {
+                Ok(()) => {
+                    let pg = st.borrow().page;
+                    show(&ui, &mut st.borrow_mut(), pg);
+                    push_page_notes(&ui, &st.borrow());
+                    notify(&ui, &st, "Copia de trabajo lista: las notas se guardarán ahí".into());
+                }
+                Err(e) => notify(&ui, &st, format!("No se pudo crear la copia: {e:#}")),
             }
         });
     }
@@ -2168,6 +2220,20 @@ mod tests {
         // la nota se lee del fichero guardado (roundtrip)
         let notes = read_notes(st.pdfium, &out);
         assert!(notes.iter().any(|n| n.text.contains("nota redonda") && n.page == 0));
+    }
+
+    #[test]
+    fn el_prestamo_se_suelta_antes_de_usar_el_resultado() {
+        // el helper existe para esto: si el RefMut sobrevive al match, el
+        // RefCell peta ("RefCell already borrowed") y la app se cae
+        let c = Rc::new(RefCell::new(vec![1, 2, 3]));
+        let res = with_state(&c, |v: &mut Vec<i32>| v.len());
+        match res {
+            n => {
+                c.borrow_mut().push(n as i32); // otro préstamo: no debe petar
+                assert_eq!(c.borrow().len(), 4);
+            }
+        }
     }
 
     #[test]
