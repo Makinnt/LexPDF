@@ -1,79 +1,183 @@
 # LexPDF
 
-Revisor de PDF de escritorio, **100% offline**. Abre PDFs, revisa ortografía y sintaxis en español e inglés en segundo plano, subraya errores sobre la página y permite omitirlos o inyectar notas nativas en el PDF.
+Revisor de PDF de escritorio que funciona **sin internet**. Abre un PDF, pasa cada página
+por LanguageTool en tu propio PC, te subraya los errores ortográficos y gramaticales
+**sobre la página**, y te deja anotar el documento con notas nativas.
 
-Sin red, sin telemetría.
+Sin cuentas, sin nube, sin telemetría. El PDF no sale del ordenador.
 
-## Características
+```
+┌─ sidebar ─────────┐┌─ visor ────────────────────────────┐
+│ LexPDF      Oscuro││  ←  Pág 12 de 62  →  📄 Nota  🔍- 50% 🔍+│
+│ ▓▓▓▓░░░░░░░░░░░░░░││                                       │
+│ Carso   Ortografía││      E l   v i e j o   y   e l   m a r│
+│ "Posible falta..."││                                       │
+│ → Cargo, Caso, Casó││   ─────────────────────────────    │
+│ [Omitir][Comentar]││      (los errores van subrayados     │
+│ [Obs. gramatical] ││       justo en la página)            │
+└───────────────────┘└───────────────────────────────────────┘
+```
 
-- Apertura de PDF con renderizado por página, navegación, zoom (50–300%, editable + rueda) y scroll.
-- Extracción de texto con coordenadas (origen abajo-izquierda, puntos PDF).
-- Revisión ES/EN con LanguageTool local (sidecar Java): ortografía (categoría TYPOS) + sintaxis, con barra de progreso única.
-- Subrayado por clase quemado en el bitmap (rojo ortografía, morado sintaxis) + flash amarillo al seleccionar un error.
-- Clasificación por tipo (`Ortografía`/`Sintaxis`) y gravedad (`grave`/`intermedia`/`mínima`), con 2 desplegables de filtro.
-- Lista ordenada por aparición, con descripciones ES/EN y sugerencias LT.
-- Omitir / restaurar (en cascada si hay solape con otra clase) + agrupado ×5 con comentar/rechazar/desagrupar.
-- Notas adhesivas nativas acumulativas en `{nombre}_anotado.pdf` — jamás toca el original; nota libre en cualquier punto del visor.
-- Tema claro / oscuro propio (`PDF_DARK=1` para arrancar en oscuro).
-- Apertura directa por argumento: `cargo run -- doc.pdf` (ideal para demos).
+## Esto está vibe-coded
 
-## Stack
+Conviene decirlo antes que nada: **LexPDF está hecho con asistencia de IA** (Claude, en
+sesiones cortas, con un modo de trabajo llamado "Ponytail" que obliga a no over-engineer
+nada). El resultado es un proyecto que funciona, pero con la textura típica de esa forma
+de trabajar:
 
-- **Rust 2021**, binario único en `src/main.rs`.
-- UI declarativa con **Slint 1.10** en `ui/app.slint` (controles propios, sin `std-widgets`).
-- PDF con **PDFium** vía `pdfium-render` 0.8 (binarios en `assets/pdfium/`).
-- Sintaxis+ortografía con **LanguageTool 6.x** (sidecar Java hijo, reutiliza externo en `:8081`) + `ureq` 3 sync.
+- **El código es legible y está documentado**, pero es *mucho* código en dos ficheros
+  (`src/main.rs` y `ui/app.slint`). No hay capas, ni abstracciones, ni patrones de
+  arquitectura: hay funciones y structs. Para un proyecto de un solo ejecutable, funciona.
+- **Hay tests**, pero son 16 tests de las partes que duelen (coordenadas, subrayado,
+  redondeo de notas, permisos, el chute del `RefCell` que tumbaba la app). No hay
+  cobertura end-to-end.
+- **Los bugs existen y los conoces por el camino.** Los que nos comimos están escritos
+  en `AGENTS.md`: que un `TouchArea` declarado después del contenido se traga los clics,
+  que `Text` es `@implicit_size` y por eso el texto se pegaba a la izquierda, que
+  instanciar `Pdfium` dos veces se cuelga en `bind`, que un `RefMut` en el scrutinee de
+  un `match` viva hasta el final y haga petar el `RefCell`... Ese fichero **es el diario
+  de a bordo del proyecto** y probablemente lo más útil que hay en el repo.
+- **El código no está auditado.** Úsalo con criterio: es ideal para documentos propios
+  o de trabajo, pero si vas a meter un documento confidencial, lee antes la sección
+  [Modelo de amenazas](#modelo-de-amenazas) y comprueba lo que te importe.
+
+Si te mola el estilo, puedes seguir el rastro: cada commit es una mejora pequeña y
+verificable, y los mensajes dicen qué se tocaba y por qué.
+
+## Qué hace
+
+- Abre PDFs (también **con contraseña**) y los renderiza página a página: navegación,
+  zoom 50–300 % (editable y con rueda), scroll.
+- Extrae el texto con coordenadas y lo revisa en segundo plano con **LanguageTool local**
+  (sidecar Java): ortografía (categoría `TYPOS`) y sintaxis, con barra de progreso.
+- **Subraya los errores en la propia página**: rojo = ortografía, morado = sintaxis.
+  Al pinchar un error saltas a su página y se resalta en amarillo.
+- Clasifica por tipo (`Ortografía`/`Sintaxis`) y gravedad (`grave`/`intermedia`/`mínima`),
+  con dos desplegables para filtrar.
+- **Omitir / restaurar** (en cascada si se solapa con otra clase) y agrupar errores
+  repetidos (×5+) para no ver 40 veces la misma falta.
+- **Notas nativas**: al pasar el ratón por un marcador ámbar sale un tooltip con el
+  texto de esa nota. Se guardan en `{nombre}_anotado.pdf`; **el original no se toca
+  nunca**.
+- Nota libre en cualquier punto de la página.
+- Tema claro/oscuro (`PDF_DARK=1` para arrancar en oscuro).
+- Apertura directa por argumento: `cargo run -- doc.pdf`.
 
 ## Requisitos
 
-- Rust estable + Cargo.
-- Java 17+ en el `PATH` (sidecar de revisión).
-- Red solo en el primer build (descarga LT ~240MB a `assets/lt/`, gitignoreado).
-- Linux: `libpdfium.so` ya incluido en `assets/pdfium/`, `build.rs` lo copia junto al exe. Alternativa: `PDFIUM_DYNAMIC_LIB_PATH=...`.
-- Windows: se usa `assets/pdfium/pdfium.dll` del mismo modo.
+- **Rust estable** + Cargo.
+- **Java 17+** en el `PATH` (es el motor de revisión).
+- Red **solo en el primer build**: se descarga LanguageTool (~240 MB) a `assets/lt/`,
+  que va gitignoreado. Después, ni el build ni la app necesitan red.
+- Linux: `libpdfium.so` ya está en `assets/pdfium/` y `build.rs` lo copia junto al
+  ejecutable (o `PDFIUM_DYNAMIC_LIB_PATH=...`).
+- Windows: igual, con `assets/pdfium/pdfium.dll`.
 
 ## Uso rápido
 
 ```bash
-cargo run -- /ruta/doc.pdf
-# o sin argumento: elige el PDF en el diálogo
-
-PDF_DARK=1 cargo run -- doc.pdf
-cargo test --bin lexpdf
-cargo build   # debug ~400MB por Slint, normal
+cargo run -- /ruta/doc.pdf      # abre directo, sin diálogo
+cargo run                        # sin argumento: eliges el PDF
+PDF_DARK=1 cargo run -- doc.pdf  # arranca en oscuro
+cargo test --bin lexpdf          # 16 tests, rápido
+cargo build                      # debug; ~400 MB por Slint, es normal
 ```
 
-Flujo típico: abre PDF → espera la barra → clic en un error para ver el detalle y saltar a su página → `Omitir`, `Comentar` u `Obs. gramatical` → la nota se acumula en `{nombre}_anotado.pdf`.
+El flujo normal: abres el PDF → esperas a la barra → pinchas un error para ver el
+detalle y saltar a su página → `Omitir`, `Comentar` u `Obs. gramatical` → la nota se
+guarda sola en la copia de trabajo.
+
+La primera vez que abres un documento te pregunta si quieres crear la copia
+`_anotado.pdf` (donde van las notas). Si dices que no, puedes crear el botón "Crear
+copia de trabajo" en cualquier momento; y si no hay copia, al guardar una nota te
+vuelve a preguntar (el texto **no** se pierde).
+
+## Stack
+
+- **Rust 2021**, un solo binario en `src/main.rs`.
+- UI declarativa con **Slint 1.18** en `ui/app.slint` (controles propios, nada de
+  `std-widgets`).
+- PDF con **PDFium** vía `pdfium-render` 0.8 (binarios en `assets/pdfium/`).
+- Ortografía y sintaxis con **LanguageTool 6.x** (sidecar Java hijo) + `ureq` 3 sync.
+- Iconos **Material Icons Outlined** (Apache-2.0), incrustados como `Path` SVG.
 
 ## Estructura
 
 ```
 Cargo.toml      # ureq (HTTP sync al sidecar) + serde_json (/v2/check)
 build.rs        # compila ui/app.slint + copia libpdfium + descarga LT a assets/lt/
-src/main.rs     # app completa: render, extracción, scan, subrayado, notas
-ui/app.slint    # ventana, sidebar 400px, cards, desplegables, visor con zoom, temas
-assets/pdfium/  # libpdfium.so + pdfium.dll + LICENSE.pdfium + licenses/ + VERSION.pdfium
+src/main.rs     # la app entera: render, extracción, escaneo, subrayado, notas
+ui/app.slint    # ventana, sidebar, cards, desplegables, visor con zoom, temas
+AGENTS.md       # el diario de a bordo: gotchas, decisiones y estado del proyecto
+assets/pdfium/  # libpdfium.so + pdfium.dll + LICENSE.pdfium + licenses/
+assets/icons/   # licencia Apache-2.0 de Material Icons
 assets/lt/      # LanguageTool desempaquetado (gitignoreado, lo baja build.rs)
 input/          # PDFs de prueba
 index.html      # prototipo web anterior, solo referencia de diseño/UX
 ```
 
-En runtime LT se busca en: `$LT_HOME` → junto al exe → `CARGO_MANIFEST_DIR/assets/lt/`.
+En runtime, LanguageTool se busca en: `$LT_HOME` → junto al ejecutable →
+`CARGO_MANIFEST_DIR/assets/lt/`.
 
-## Cómo funciona
+## Cómo funciona (por encima)
 
-- `show()`: renderiza la página (1400px·zoom), extrae palabras y pinta subrayados por clase + flash. No toca el escaneo.
-- `start_scan()` + `scan_tick()` (Timer 250ms, presupuesto 80ms): encola todas las páginas desde la visible, extrae palabras por trozos en el hilo UI y lanza un hilo HTTP al sidecar por página (nunca Pdfium en hilos: se cuelga en `bind`).
-- `syntax_page()`: offsets en chars de LT → box unión (`join_words`/`span_to_box`), clase por categoría, gravedad por regla.
-- `State` central en `Rc<RefCell<State>>`: `all_errs` (todo el doc) + `view` (índices filtrados). Los handlers reciben índice de fila → mapear por `view`.
-- `annotate*()`: sticky-notes nativas acumulativas sobre `{nombre}_anotado.pdf` (vía temporal+rename).
+- `show()`: renderiza la página (1400 px · zoom), extrae palabras y pinta los subrayados
+  por clase y el flash. El documento queda **abierto en memoria**: cambiar de página solo
+  renderiza, no reabre el PDF.
+- `start_scan()` + `scan_tick()` (timer de 250 ms, presupuesto de 80 ms por tick): encola
+  todas las páginas desde la visible, extrae palabras por trozos en el hilo de la UI y
+  lanza **un hilo HTTP por página** contra el sidecar (nunca Pdfium en hilos: se cuelga).
+- `syntax_page()`: offsets en caracteres de LT → caja unión (`join_words`/`span_to_box`),
+  clase por categoría y gravedad por regla.
+- `State` central en `Rc<RefCell<State>>`: `all_errs` (todo el documento) + `view`
+  (índices ya filtrados). Los callbacks de la UI reciben el índice de fila → hay que
+  mapear por `view` antes de tocar `all_errs`.
+- `annotate_open()`: sticky-notes nativas sobre la copia de trabajo, guardadas vía
+  temporal + rename (Pdfium tiene el fichero mapeado).
+
+## Modelo de amenazas
+
+Qué sale de tu ordenador, exactamente:
+
+- El **PDF nunca sale** del proceso. Lo único que viaja es el *texto* de cada página, al
+  motor local por **loopback** (`127.0.0.1`), en un puerto libre elegido en cada
+  ejecución para que ningún proceso ajeno lo intercepte.
+- El **JVM del motor está encerrado**: el proxy apunta a un puerto muerto, así que
+  LanguageTool no puede salir a Internet aunque lo intentara.
+- `ureq` va **sin TLS**: no puede ni hablar https. Hay un *tripwire* que aborta el
+  proceso si la URL se sale de loopback.
+- La copia de trabajo y el historial se guardan en modo **0600** (solo tu usuario) y
+  `~/.config/lexpdf` en 0700.
+- La **contraseña** de un PDF protegido se pide una vez, vive solo en memoria y nunca se
+  escribe en disco ni en el historial.
+
+Y lo que **no** podemos prometerte:
+
+- El texto de cada página está en la memoria del proceso Java. Si alguien compromete tu
+  máquina, está comprometido.
+- Tus notas se guardan **en claro dentro del PDF**. Cifrar el PDF no está en el alcance.
+- Un PDF con contraseña de *permisos* (no de apertura) no admite notas: avisa el error.
 
 ## Límites conocidos
 
-- Primer arranque del sidecar: ~4-10s (calienta reglas); en caliente ~80ms/check, ~650MB RAM.
-- Extracción = unión simple de boxes por carácter, sin shaping tipográfico.
-- No hay reemplazo de texto en el PDF, solo sugerencias de referencia + notas.
+- Primer arranque del motor: ~4-10 s (calienta las reglas); en caliente ~80 ms por
+  comprobación y ~650 MB de RAM.
+- La extracción de texto es la unión simple de cajas por carácter, sin *shaping*
+  tipográfico: en documentos con kerning raro el subrayado puede quedar un pelín desplazado.
+- No se reemplaza texto dentro del PDF: las sugerencias son de referencia.
+- El ratón se usa para el hover de las notas; en pantallas táctiles el tooltip no sale
+  (se puede leer la nota abriendo el PDF en otro visor).
+
+## Cómo participar
+
+- **Reporta un bug** con el PDF (o un trocito) y los pasos: eso es lo que más ayuda.
+- **Lee `AGENTS.md` antes de tocar el código**: está lleno de trampas ya pagadas.
+- Si tocas la UI, recuerda las dos reglas de Slint que más caro salen: el `TouchArea`
+  va *después* del contenido (si no, se come los clics) y los `Text` necesitan
+  `width/height` explícitos para poder centrase.
 
 ## Licencia
 
-GPL-3.0-only — ver `LICENSE` (la exige Slint, enlazado estático). `pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`. Binarios LT: LGPL como sidecar aparte (LanguageTool).
+**GPL-3.0-only** — ver `LICENSE` (la exige Slint, que va enlazado estáticamente).
+`pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`.
+Iconos: Apache-2.0 (Material Icons). Binarios de LanguageTool: LGPL, como sidecar aparte.
