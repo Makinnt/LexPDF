@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::Context;
 use pdfium_render::prelude::*;
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode, VecModel};
+use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, StyledText, Timer, TimerMode, VecModel};
 
 slint::include_modules!();
 
@@ -875,40 +875,23 @@ fn open_doc(ui: &AppWindow, st: &Rc<RefCell<State>>, path: PathBuf) {
     let notes = read_notes(&st.borrow().pdfium, &path);
     st.borrow_mut().path = Some(path);
     st.borrow_mut().doc_notes = notes;
-    push_notes(ui, st);
     show(ui, &mut st.borrow_mut(), 0);
     start_scan(ui, &mut st.borrow_mut());
     touch_history(&st.borrow());
     push_history(ui);
 }
 
-/// Relee las notas del PDF tras anotar (acumulan) y actualiza lista + historial.
+/// Relee las notas del PDF tras anotar (acumulan) y repinta los marcadores + historial.
 fn refresh_notes(ui: &AppWindow, st: &Rc<RefCell<State>>) {
     let path = st.borrow().path.clone();
     if let Some(p) = path {
         let notes = read_notes(&st.borrow().pdfium, &p);
         st.borrow_mut().doc_notes = notes;
     }
-    push_notes(ui, st);
     touch_history(&st.borrow());
     push_history(ui);
     let pg = st.borrow().page;
     show(ui, &mut st.borrow_mut(), pg); // repinta marcadores
-}
-
-fn push_notes(ui: &AppWindow, st: &Rc<RefCell<State>>) {    let rows: Vec<NoteRow> = st
-        .borrow()
-        .doc_notes
-        .iter()
-        .map(|n| {
-            let mut t: String = n.text.chars().take(80).collect();
-            if n.text.chars().count() > 80 {
-                t.push('…');
-            }
-            NoteRow { text: t.into(), page: n.page as i32 }
-        })
-        .collect();
-    ui.set_notes(ModelRc::new(VecModel::from_slice(&rows)));
 }
 fn marker(img: &mut image::RgbaImage, x: f32, y: f32) {
     let (iw, ih) = (img.width() as i64, img.height() as i64);
@@ -1032,6 +1015,22 @@ fn show(ui: &AppWindow, st: &mut State, page: u32) {
             ui.set_img_w(iw as i32);
             ui.set_img_h(ih as i32);
             st.words = words;
+            // notas nativas de esta página: el Slint pone el tooltip al pasar el ratón
+            let pn: Vec<NoteRow> = st
+                .doc_notes
+                .iter()
+                .filter(|n| n.page == page)
+                .map(|n| {
+                    let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
+                    let mut t: String = n.text.chars().take(200).collect();
+                    if n.text.chars().count() > 200 {
+                        t.push('…');
+                    }
+                    NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y }
+                })
+                .collect();
+            ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
+            ui.set_note_total(st.doc_notes.len() as i32);
         }
         Err(e) => {
             ui.set_popup_text(format!("Error: {e:#}").into());
@@ -1553,30 +1552,6 @@ fn main() -> anyhow::Result<()> {
             }
             ui.set_selected_note(-1);
             push_errs(&ui, &st);
-        });
-    }
-    {
-        let ui_weak = ui.as_weak();
-        let st = st.clone();
-        ui.on_docnote_clicked(move |i| {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let n = match st.borrow().doc_notes.get(i as usize).cloned() {
-                Some(n) => n,
-                None => return,
-            };
-            if n.page != st.borrow().page {
-                show(&ui, &mut st.borrow_mut(), n.page);
-            }
-            // centra como un error cualquiera
-            let s = st.borrow();
-            if s.img_w > 0 && s.img_h > 0 {
-                let (x, y, w, h) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, s.page_w, s.page_h, s.img_w, s.img_h);
-                let (vw, vh) = (ui.get_view_w(), ui.get_view_h());
-                ui.set_view_x(-((x + w / 2.0 - vw / 2.0).clamp(0.0, (s.img_w as f32 - vw).max(0.0))));
-                ui.set_view_y(-((y + h / 2.0 - vh / 2.0).clamp(0.0, (s.img_h as f32 - vh).max(0.0))));
-            }
-            drop(s);
-            notify(&ui, &st, format!("pág {}: {}", n.page + 1, n.text.chars().take(120).collect::<String>()));
         });
     }
     {

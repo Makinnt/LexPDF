@@ -17,6 +17,7 @@ build.rs        # compila ui/app.slint + copia libpdfium junto al exe + descarga
 src/main.rs     # TODO el código Rust (un solo binario a propósito)
 ui/app.slint    # TODO el UI (controles propios, sin std-widgets)
 assets/pdfium/  # libpdfium.so + pdfium.dll + LICENSE.pdfium + licenses/ + VERSION.pdfium
+assets/icons/   # licencia Apache-2.0 de Material Icons (glifos incrustados en ui/app.slint)
 assets/lt/      # LanguageTool desempaquetado (gitignoreado, lo baja build.rs)
 input/          # PDFs reales de prueba (El-viejo-y-el-mar.pdf)
 index.html      # prototipo web anterior, solo referencia de diseño/UX
@@ -83,6 +84,16 @@ Flujos:
   `width/height: parent` explícito.
 - `TextInput` con `accepted =>` guarda con Enter si hay texto. No existe
   `multi-line` en esta versión de Slint (solo una línea).
+- **GOTCHA `Text` dentro de `Rectangle`**: `Text` es `@implicit_size`, así que sin
+  `width/height` explícitos su caja se ajusta al texto y `horizontal-alignment:
+  center` **no hace nada** (la etiqueta queda pegada a la izquierda/arriba de la
+  pastilla). Todo texto de botón lleva `width: parent.width; height: parent.height;`.
+- Iconos = **Material Icons Outlined 24px** (Apache-2.0) como `Path { commands: ... }`
+  (path SVG tal cual, `viewBox 0 0 24 24`; `fill: root.c-fg` para que siga el tema).
+  Componentes `Icon*` al tope de `ui/app.slint`; licencia en `assets/icons/`.
+- Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
+  24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
+  de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
 - `Flickable + VerticalLayout + for` para la lista (no `ListView` de std-widgets).
 - Cards: franja de color por gravedad + palabra + tipo/gravedad/pág +
   descripción ES/EN + sugerencias LT (`No hay sugerencias` si vacío) +
@@ -110,13 +121,13 @@ Fase 5 (revisión 100% LT: `kind`=Ortografía|Sintaxis + `sev` mínima|intermedi
 (categoría LT; TYPOS=ortografía), 2 desplegables propios `DropSel`
 Tipo+Gravedad —inline, sin std-widgets—, omitir en cascada por solape de boxes
 + limpieza de flash, barra única vía `refresh_progress`, subrayado por clase (rojo
-ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `✎ Nota`
-(panel sobre la página visible → `annotate_at`), notas acumulativas sobre
+ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `Nota`
+(icono `note_add`, panel sobre la página visible → `annotate_at`), notas acumulativas sobre
 `_anotado.pdf` (guardado vía temporal+rename — Pdfium mapea el archivo), sidecar java hijo —reutiliza externo
  en :8081—, `LtReady/LtFail/Syn(gen)` con `scan_id`, hilos de página solo HTTP
  con palabras clonadas —nunca Pdfium en hilos—, offsets en chars → box unión
  vía `join_words`/`span_to_box`; notas existentes leídas (`read_notes` →
- marcadores ámbar + sección Notas → salto centrado); historial 10 últimos en
+ marcadores ámbar + tooltip al pasar el ratón por encima, sin lista); historial 10 últimos en
  `~/.config/lexpdf/history.json` (errores/omitidos/notas + % revisado,
  sección Recientes → `open_doc`); `build.rs` descarga LT ~240MB a `assets/lt/`
  gitignoreado —requiere red en build y Java 17+ en runtime—; medido: arranque

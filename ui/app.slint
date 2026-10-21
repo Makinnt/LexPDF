@@ -1,3 +1,11 @@
+// Iconos: Material Icons Outlined 24px (Apache-2.0), ver assets/icons/LICENSE-Material-Icons.txt.
+// Path SVG tal cual (viewBox 0 0 24 24): Slint escala el trazo al width/height del elemento.
+component IconArrowBack inherits Path { commands: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"; }
+component IconArrowFwd inherits Path { commands: "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z"; }
+component IconNoteAdd inherits Path { commands: "M13 11h-2v3H8v2h3v3h2v-3h3v-2h-3zm1-9H6c-1.1 0-2 .9-2 2v16c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"; }
+component IconZoomIn inherits Path { commands: "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm.5-7H9v2H7v1h2v2h1v-2h2V9h-2z"; }
+component IconZoomOut inherits Path { commands: "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z"; }
+
 struct ErrRow {
     word: string,
     sug: string,
@@ -12,8 +20,10 @@ struct ErrRow {
 }
 
 struct NoteRow {
-    text: string,
+    text: styled-text,   // texto plano (sin markdown)
     page: int,
+    x: float,   // px en la imagen de la página (origen arriba-izq)
+    y: float,
 }
 
 struct HisRow {
@@ -32,7 +42,11 @@ component MiniBtn inherits Rectangle {
     border-radius: 4px;
     Text {
         text: label; color: fg; font-size: 11px;
+        // Text es @implicit_size: sin width/height explicitos el texto se pega
+        // a la izquierda de la pastilla y horizontal-alignment no hace nada.
+        width: parent.width; height: parent.height;
         horizontal-alignment: center; vertical-alignment: center;
+        overflow: elide;
     }
     TouchArea { width: parent.width; height: parent.height; clicked => { root.clicked(); } }
 }
@@ -95,7 +109,8 @@ export component AppWindow inherits Window {
     in-out property <int> word-count: 0;
     in-out property <string> word-sample: "";
     in-out property <[ErrRow]> errors;
-    in-out property <[NoteRow]> notes;
+    in-out property <[NoteRow]> page-notes;
+    in-out property <int> note-total: 0;
     in-out property <[HisRow]> history;
     in-out property <string> spell-status: "";
     in-out property <bool> is-dark: false;
@@ -131,7 +146,6 @@ export component AppWindow inherits Window {
     callback type-set(int);
     callback sev-set(int);
     callback popup-dismiss();
-    callback docnote-clicked(int);
     callback history-open(int);
     callback zoom-in();
     callback zoom-out();
@@ -178,6 +192,7 @@ export component AppWindow inherits Window {
                         Text {
                             text: root.is-dark ? "Claro" : "Oscuro";
                             color: root.c-fg; font-size: 12px;
+                            width: parent.width; height: parent.height;
                             horizontal-alignment: center; vertical-alignment: center;
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.theme-toggle(); } }
@@ -192,6 +207,7 @@ export component AppWindow inherits Window {
                     Text {
                         text: "Subir y Analizar Documento";
                         color: root.c-accent-fg; font-size: 14px;
+                        width: parent.width; height: parent.height;
                         horizontal-alignment: center; vertical-alignment: center;
                     }
                     TouchArea { width: parent.width; height: parent.height; clicked => { open-pdf(); } }
@@ -207,6 +223,7 @@ export component AppWindow inherits Window {
                             text: m;
                             color: root.lang-idx == i ? root.c-accent-fg : root.c-fg;
                             font-size: 12px;
+                            width: parent.width; height: parent.height;
                             horizontal-alignment: center; vertical-alignment: center;
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.lang-set(i); } }
@@ -379,23 +396,11 @@ export component AppWindow inherits Window {
                     horizontal-alignment: center;
                     visible: !root.has-doc;
                 }
-                if (root.notes.length > 0): VerticalLayout {
-                    spacing: 4px;
-                    Text { text: "Notas en el PDF (" + root.notes.length + ")"; font-size: 14px; font-weight: 700; color: root.c-fg; }
-                    VerticalLayout {
-                        spacing: 2px;
-                        for n[i] in root.notes: Rectangle {
-                            background: root.c-card;
-                            border-color: root.c-line; border-width: 1px; border-radius: 6px;
-                            VerticalLayout {
-                                padding: 6px; spacing: 2px;
-                                horizontal-stretch: 1;
-                                Text { text: n.text; font-size: 12px; color: root.c-fg; wrap: word-wrap; max-height: 34px; overflow: elide; }
-                                Text { text: "pág " + (n.page + 1); font-size: 11px; color: root.c-dim; }
-                            }
-                            TouchArea { width: parent.width; height: parent.height; clicked => { root.docnote-clicked(i); } }
-                        }
-                    }
+                // pista: las notas ya no se listan, se ven al pasar el ratón por el marcador
+                if (root.page-notes.length > 0): Text {
+                    text: "Notas: " + root.page-notes.length + " en esta página · "
+                        + root.note-total + " en el documento · pásale el ratón por los marcadores ámbar";
+                    font-size: 11px; color: root.c-dim; wrap: word-wrap;
                 }
             }
         }
@@ -413,20 +418,39 @@ export component AppWindow inherits Window {
                     Rectangle {
                         width: 34px; height: 28px;
                         background: root.c-pill; border-radius: 4px;
-                        Text { text: "◀"; color: root.c-fg; horizontal-alignment: center; vertical-alignment: center; }
+                        IconArrowBack {
+                            width: 18px; height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: root.c-fg;
+                        }
                         TouchArea { width: parent.width; height: parent.height; clicked => { prev-page(); } }
                     }
                     Text { text <=> root.page-label; font-size: 13px; color: root.c-dim; vertical-alignment: center; }
                     Rectangle {
                         width: 34px; height: 28px;
                         background: root.c-pill; border-radius: 4px;
-                        Text { text: "▶"; color: root.c-fg; horizontal-alignment: center; vertical-alignment: center; }
+                        IconArrowFwd {
+                            width: 18px; height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: root.c-fg;
+                        }
                         TouchArea { width: parent.width; height: parent.height; clicked => { next-page(); } }
                     }
                     Rectangle {
-                        width: 52px; height: 28px;
+                        width: 66px; height: 28px;
                         background: root.c-pill; border-radius: 4px;
-                        Text { text: "✎ Nota"; color: root.c-fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        IconNoteAdd {
+                            width: 16px; height: 16px;
+                            x: 8px; y: (parent.height - self.height) / 2;
+                            fill: root.c-fg;
+                        }
+                        Text {
+                            text: "Nota"; color: root.c-fg; font-size: 12px;
+                            x: 28px; y: (parent.height - self.height) / 2;
+                            vertical-alignment: center;
+                        }
                         TouchArea { width: parent.width; height: parent.height; clicked => { free-note-new(); } }
                     }
                     TouchArea {
@@ -440,7 +464,12 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 width: 28px; height: 28px;
                                 background: root.c-pill; border-radius: 4px;
-                                Text { text: "−"; color: root.c-fg; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                                IconZoomOut {
+                                    width: 18px; height: 18px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    fill: root.c-fg;
+                                }
                                 TouchArea { width: parent.width; height: parent.height; clicked => { zoom-out(); } }
                             }
                             Rectangle {
@@ -456,7 +485,12 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 width: 28px; height: 28px;
                                 background: root.c-pill; border-radius: 4px;
-                                Text { text: "+"; color: root.c-fg; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                                IconZoomIn {
+                                    width: 18px; height: 18px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    fill: root.c-fg;
+                                }
                                 TouchArea { width: parent.width; height: parent.height; clicked => { zoom-in(); } }
                             }
                         }
@@ -480,6 +514,13 @@ export component AppWindow inherits Window {
                         Image {
                             source <=> root.page-image;
                             width: 100%; height: 100%;
+                        }
+                        // notas nativas: zona sensible sobre el marcador ámbar -> tooltip al pasar el ratón.
+                        // va ANTES del pg-touch: en modo nota el TouchArea de arriba se come el hover.
+                        for n in root.page-notes: Rectangle {
+                            x: n.x * 1px - 8px; y: n.y * 1px - 8px;
+                            width: 24px; height: 24px;
+                            Tooltip { text: n.text; }
                         }
                         // solo en modo nota: el toque marca el punto, no interfiere si no
                         if (root.free-note-on): pg-touch := TouchArea {

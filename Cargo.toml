@@ -9,7 +9,7 @@ name = "lexpdf"
 path = "src/main.rs"
 
 [dependencies]
-slint = "1.10"
+slint = "1.18"
 pdfium-render = "0.8"
 image = "0.25"
 rfd = "0.15"
@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] } # ponytail: solo para el histor
 serde_json = "1" # ponytail: parsea /v2/check sin tipos extra
 
 [build-dependencies]
-slint-build = "1.10"
+slint-build = "1.18"
 ureq = "3"
 zip = "0.6"
 
