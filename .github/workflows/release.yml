@@ -77,6 +77,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
+          body: |
+            ## Novedades
+
+            - **Iconos Material** en flechas, nota y zoom (Material Icons Outlined, Apache-2.0).
+            - **Notas al pasar el ratón**: el texto de cada nota nativa sale en un tooltip sobre su marcador (ya no hay lista aparte).
+            - **Botones centrados**: se arregla el texto que se pegaba a la izquierda en todas las pastillas.
+            - **Copia de trabajo única**: las notas van siempre a `{nombre}_anotado.pdf`; ya no se crea un `_anotado_anotado`. Se pregunta al abrir si la quieres y se guarda al momento.
+            - **Documento abierto en memoria**: cambiar de página ya no reabre el PDF (solo renderiza) y la contraseña se pide una sola vez.
+            - **PDF con contraseña**: se pueden abrir documentos protegidos (la clave no se guarda en disco).
+            - **Red cerrada**: el motor de revisión arranca en un puerto libre por ejecución y con el JVM encerrado (no puede salir a Internet). El PDF nunca sale del PC; solo el texto de cada página, en local.
+            - **Permisos**: la copia de trabajo y el historial se guardan en modo 0600 (solo tu usuario).
+
+            Esta es una **candidata** (rc) de la rama `experimental`: si algo falla, dime y se arregla aquí.
           files: dist/LexPDF-x86_64.AppImage
 
   build-windows:
@@ -164,4 +177,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
+          body: |
+            ## Novedades
+
+            - **Iconos Material** en flechas, nota y zoom (Material Icons Outlined, Apache-2.0).
+            - **Notas al pasar el ratón**: el texto de cada nota nativa sale en un tooltip sobre su marcador (ya no hay lista aparte).
+            - **Botones centrados**: se arregla el texto que se pegaba a la izquierda en todas las pastillas.
+            - **Copia de trabajo única**: las notas van siempre a `{nombre}_anotado.pdf`; ya no se crea un `_anotado_anotado`. Se pregunta al abrir si la quieres y se guarda al momento.
+            - **Documento abierto en memoria**: cambiar de página ya no reabre el PDF (solo renderiza) y la contraseña se pide una sola vez.
+            - **PDF con contraseña**: se pueden abrir documentos protegidos (la clave no se guarda en disco).
+            - **Red cerrada**: el motor de revisión arranca en un puerto libre por ejecución y con el JVM encerrado (no puede salir a Internet). El PDF nunca sale del PC; solo el texto de cada página, en local.
+            - **Permisos**: la copia de trabajo y el historial se guardan en modo 0600 (solo tu usuario).
+
+            Esta es una **candidata** (rc) de la rama `experimental`: si algo falla, dime y se arregla aquí.
           files: dist/lexpdf-setup.exe
