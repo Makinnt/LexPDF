@@ -26,9 +26,17 @@ struct Word {
 }
 
 struct State {
-    // ponytail: recargamos el doc por página para evitar líos de lifetimes Pdfium/PdfDocument; cachear si va lento
-    pdfium: Pdfium,
-    path: Option<PathBuf>,
+    // ponytail: Pdfium filtrado a 'static (Box::leak) para poder guardar el
+    // PdfDocument en el estado; si no, PdfDocument<'a> tomaría prestado el
+    // Pdfium y no se podría tener sin struct autoreferente.
+    pdfium: &'static Pdfium,
+    doc: Option<PdfDocument<'static>>, // documento abierto (no se reabre por página)
+    doc_from: Option<PathBuf>,           // de dónde se abrió
+    doc_stamp: Option<(i64, u64)>,       // (mtime, tamaño) al abrir: si cambia, se reabre
+    path: Option<PathBuf>,               // el documento que abrió el usuario (historial)
+    working: Option<PathBuf>,            // copia de trabajo "{nombre}_anotado.pdf"
+    password: Option<&'static str>,      // solo en memoria, nunca en disco
+    dlg_pending: Option<Pending>,        // acción pendiente de un diálogo
     page: u32,
     total: u32,
     words: Vec<Word>,
@@ -58,6 +66,21 @@ struct State {
     lt_child: Option<std::process::Child>, // hijo java propio
     tx: Sender<SpellMsg>,
     last_lang: i32,
+}
+
+/// Qué hacer cuando el usuario responde a un diálogo.
+enum Pending {
+    CreateCopy,                       // crear la copia de trabajo y seguir
+    CreateCopyThenNote(AnnotateReq),  // crear la copia y luego anotar
+    OpenWithPassword(PathBuf),        // reintentar la apertura con contraseña
+}
+
+/// Anotación a crear (se aplica al documento abierto).
+#[derive(Clone)]
+enum AnnotateReq {
+    Error(usize, String),            // índice en all_errs + texto
+    Many(Vec<usize>, String),        // grupo de hallazgos + texto
+    AtPoint(u32, f32, f32, String),  // página, x, y (puntos PDF) + texto
 }
 
 #[derive(Clone, Debug)]
@@ -137,8 +160,6 @@ enum SpellEvent {
 }
 type SpellMsg = SpellEvent;
 
-const LT_PORT: u16 = 8081;
-
 /// Qué `java` usar: $JAVA_BIN → `jre\bin\java.exe` junto al exe (instalador
 /// Windows) → `java` del PATH. Devuelve el comando listo para Command.
 fn java_cmd() -> std::process::Command {
@@ -182,7 +203,67 @@ fn lt_dir() -> Option<PathBuf> {
 }
 
 fn lt_url(path: &str) -> String {
-    format!("http://localhost:{LT_PORT}{path}")
+    format!("http://127.0.0.1:{}{path}", LT_PORT.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Puerto local del sidecar: se elige libre en cada ejecución para que ningún
+/// proceso ajeno pueda interceptar el texto (antes era 8081 fijo).
+static LT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// Pide al SO un puerto libre en loopback. Puro salvo por la llamada al SO.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+        .unwrap_or(8081)
+}
+
+/// ¿El nombre es el de una copia de trabajo ("X_anotado.pdf")?
+fn is_working_name(name: &str) -> bool {
+    name.len() > "_anotado.pdf".len() && name.ends_with("_anotado.pdf")
+}
+
+/// Ruta del fichero de trabajo de `path`. Nunca duplica el sufijo:
+/// "doc.pdf" -> "doc_anotado.pdf"; "doc_anotado.pdf" -> "doc_anotado.pdf".
+fn working_path(path: &std::path::Path) -> PathBuf {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if is_working_name(name) {
+        return path.to_path_buf();
+    }
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("doc");
+    path.with_file_name(format!("{stem}_anotado.pdf"))
+}
+
+/// (mtime en segundos, tamaño) del fichero: para detectar cambios externos.
+fn file_stamp(path: &std::path::Path) -> Option<(i64, u64)> {
+    let md = std::fs::metadata(path).ok()?;
+    let mtime = md
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    Some((mtime, md.len()))
+}
+
+/// Pdfium() filtrado a 'static: el PdfDocument lo toma prestado y así puede
+/// vivir en el estado. Fuga deliberada (el proceso termina igual).
+fn leak_pdfium(p: Pdfium) -> &'static Pdfium {
+    Box::leak(Box::new(p))
+}
+
+// Una instancia de Pdfium por hilo: crear un segundo `bind` se cuelga
+// (ver AGENTS.md). El estado la comparte; los hilos de página no la tocan.
+thread_local! {
+    static PDFIUM: &'static Pdfium = leak_pdfium(bind_pdfium());
+}
+
+/// La contraseña se filtra a 'static por lo mismo (PdfDocument la toma
+/// prestada). Solo vive en memoria: nunca se escribe a disco ni al historial.
+fn leak_secret(s: &str) -> &'static str {
+    let b: Box<str> = s.to_owned().into_boxed_str();
+    Box::leak(b)
 }
 
 /// Tripwire: el texto del PDF solo puede viajar a loopback. Puro y testeable.
@@ -194,8 +275,7 @@ fn is_loopback_url(url: &str) -> bool {
 }
 
 /// ¿Hay un servidor LT respondiendo? (sirve para reutilizar uno ya abierto).
-fn lt_alive() -> bool {
-    ureq::get(&lt_url("/v2/languages"))
+fn lt_alive() -> bool {    ureq::get(&lt_url("/v2/languages"))
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(3)))
         .build()
@@ -520,14 +600,16 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     let mut jobs: Vec<(Vec<Word>, u32, i32, u64, Sender<SpellMsg>)> = vec![];
     {
         let mut s = st.borrow_mut();
-        let Some(path) = s.path.clone() else { return false };
         while s.scan_pos < s.scan_queue.len() && t.elapsed() < std::time::Duration::from_millis(80) {
             let i = s.scan_queue[s.scan_pos];
             s.scan_pos += 1;
-            let words = {
-                let Ok(doc) = s.pdfium.load_pdf_from_file(&path, None) else { continue };
-                let Ok(pg) = doc.pages().get(i as u16) else { continue };
-                extract_words(&pg)
+            // el doc sigue abierto: no se reabre por página (solo se renderiza)
+            let words = match s.doc.as_ref() {
+                Some(doc) => match doc.pages().get(i as u16) {
+                    Ok(pg) => extract_words(&pg),
+                    Err(_) => vec![],
+                },
+                None => vec![],
             };
             if !dead {
                 jobs.push((words, i, mode, s.scan_id, s.tx.clone()));
@@ -710,26 +792,19 @@ fn save_doc(doc: &PdfDocument, out: &PathBuf) -> anyhow::Result<()> {
 
 /// Métrica visible: KB de texto revisado (siempre en loopback, ver tripwire).
 fn sec_line(kb: u64) -> String {
-    format!("Motor: listo (local :8081 · {kb} KB revisados sin salir del PC).")
+    format!("Motor: listo (local, sin red · {kb} KB revisados sin salir del PC).")
 }
 
-/// Destino de anotaciones + base a abrir: si ya existe `{nombre}_anotado.pdf`
-/// se anota ENCIMA (acumula), si no se parte del original. Nunca se toca el original.
-/// ponytail: si el _anotado es de otra sesión con otro estado, igual vale (mismo layout)
-fn annotate_base(st: &State) -> anyhow::Result<(PdfDocument, PathBuf)> {
-    let src = st.path.clone().context("sin documento")?;
-    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("doc");
-    let out = src.with_file_name(format!("{stem}_anotado.pdf"));
-    let base = if out.is_file() { &out } else { &src };
-    let doc = st.pdfium.load_pdf_from_file(base, None).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    Ok((doc, out))
-}
-
-/// Lee las sticky-notes (Text) ya existentes en el documento.
-/// Puro dato (sin lifetimes Pdfium): tolera anotaciones sin texto o sin box.
+/// Lee las sticky-notes (Text) ya existentes en un fichero (solo tests).
+#[cfg(test)]
 fn read_notes(pdfium: &Pdfium, path: &PathBuf) -> Vec<DocNote> {
+    let Ok(doc) = pdfium.load_pdf_from_file(path, None) else { return vec![] };
+    notes_of(&doc)
+}
+
+/// Las sticky-notes de un documento ya abierto.
+fn notes_of(doc: &PdfDocument) -> Vec<DocNote> {
     let mut out = vec![];
-    let Ok(doc) = pdfium.load_pdf_from_file(path, None) else { return out };
     let pages = doc.pages();
     for i in 0..pages.len() {
         let Ok(pg) = pages.get(i) else { continue };
@@ -825,8 +900,13 @@ fn touch_history(st: &State) {
     v.truncate(10);
     if let Some(dir) = f.parent() {
         let _ = std::fs::create_dir_all(dir);
+        // el historial guarda nombres de ficheros: solo su usuario debe leerlo
+        #[cfg(unix)]
+        let _ = std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700));
     }
     let _ = std::fs::write(&f, serde_json::to_string(&v).unwrap_or_default());
+    #[cfg(unix)]
+    let _ = std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 }
 
 fn push_history(ui: &AppWindow) {
@@ -866,33 +946,125 @@ fn is_pdf(path: &PathBuf) -> bool {
 }
 
 /// Abre un documento por ruta (diálogo, argv o historial): misma tubería.
+/// La copia de trabajo "{nombre}_anotado.pdf" es la fuente de verdad si ya
+/// existe (nunca se crea un "_anotado_anotado").
 fn open_doc(ui: &AppWindow, st: &Rc<RefCell<State>>, path: PathBuf) {
     if !is_pdf(&path) {
         ui.set_popup_text("Solo se admiten documentos PDF.".into());
         st.borrow_mut().popup_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
         return;
     }
-    let notes = read_notes(&st.borrow().pdfium, &path);
-    st.borrow_mut().path = Some(path);
-    st.borrow_mut().doc_notes = notes;
+    let wp = working_path(&path);
+    let working = if wp.is_file() { Some(wp) } else { None };
+    {
+        let mut s = st.borrow_mut();
+        s.path = Some(path.clone());
+        s.working = working;
+        s.doc = None;
+        s.doc_from = None;
+        s.doc_stamp = None;
+        s.doc_notes.clear();
+        s.all_errs.clear();
+        s.view.clear();
+        s.view_group.clear();
+        s.flash = None;
+        s.free_pt = None;
+    }
+    let src = st.borrow().render_from().unwrap_or_else(|| path.clone());
+    match open_doc_file(&mut st.borrow_mut(), &src) {
+        Ok(()) => {}
+        Err(e) if is_password_error(&e) => {
+            // PDF protegido: se pide la contraseña (solo en memoria)
+            st.borrow_mut().dlg_pending = Some(Pending::OpenWithPassword(path.clone()));
+            show_dlg(
+                ui,
+                1,
+                "PDF con contraseña",
+                "Este documento está protegido. Escribe la contraseña para abrirlo (no se guarda en ningún sitio).",
+            );
+            return;
+        }
+        Err(e) => {
+            notify(ui, st, format!("No se pudo abrir: {e:?}"));
+            return;
+        }
+    }
+    finish_open(ui, st, &path);
+}
+
+/// Tras abrir el documento: notas, vista, escaneo e historial.
+fn finish_open(ui: &AppWindow, st: &Rc<RefCell<State>>, path: &PathBuf) {
+    {
+        let mut s = st.borrow_mut();
+        if let Some(doc) = s.doc.as_ref() {
+            s.doc_notes = notes_of(doc);
+        }
+    }
     show(ui, &mut st.borrow_mut(), 0);
     start_scan(ui, &mut st.borrow_mut());
     touch_history(&st.borrow());
     push_history(ui);
+    // sin copia de trabajo: se pregunta si se quiere crear (las notas van allí)
+    if st.borrow().working.is_none() {
+        let wp = working_path(path);
+        let name = wp.file_name().and_then(|n| n.to_str()).unwrap_or("documento_anotado.pdf");
+        st.borrow_mut().dlg_pending = Some(Pending::CreateCopy);
+        show_dlg(
+            ui,
+            0,
+            "Copia de trabajo",
+            &format!(
+                "¿Crear la copia \"{name}\"? Tus notas se guardarán ahí; el original no se toca."
+            ),
+        );
+    }
 }
 
-/// Relee las notas del PDF tras anotar (acumulan) y repinta los marcadores + historial.
-fn refresh_notes(ui: &AppWindow, st: &Rc<RefCell<State>>) {
-    let path = st.borrow().path.clone();
-    if let Some(p) = path {
-        let notes = read_notes(&st.borrow().pdfium, &p);
-        st.borrow_mut().doc_notes = notes;
-    }
-    touch_history(&st.borrow());
-    push_history(ui);
-    let pg = st.borrow().page;
-    show(ui, &mut st.borrow_mut(), pg); // repinta marcadores
+/// Muestra un diálogo propio (0 = confirmar, 1 = contraseña).
+fn show_dlg(ui: &AppWindow, kind: i32, title: &str, msg: &str) {
+    ui.set_dlg_kind(kind);
+    ui.set_dlg_title(title.into());
+    ui.set_dlg_msg(msg.into());
+    ui.set_dlg_pass("".into());
+    ui.set_dlg_open(true);
 }
+
+/// Crea la copia de trabajo y reabre el documento desde ella.
+fn make_working(st: &Rc<RefCell<State>>) -> anyhow::Result<()> {
+    let out = create_working_copy(&mut st.borrow_mut())?;
+    st.borrow_mut().working = Some(out);
+    let src = st.borrow().render_from().context("sin documento")?;
+    open_doc_file(&mut st.borrow_mut(), &src).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    Ok(())
+}
+
+/// Aplica una anotación y la deja visible al momento. Si no hay copia de
+/// trabajo, se pregunta antes de crearla.
+fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) {
+    if st.borrow().working.is_none() {
+        st.borrow_mut().dlg_pending = Some(Pending::CreateCopyThenNote(req));
+        show_dlg(
+            ui,
+            0,
+            "Copia de trabajo",
+            "Para guardar la nota hace falta una copia \"_anotado.pdf\". El original no se toca. ¿Se crea?",
+        );
+        return;
+    }
+    match annotate_open(&mut st.borrow_mut(), &req) {
+        Ok(added) => {
+            st.borrow_mut().doc_notes.extend(added);
+            let pg = st.borrow().page;
+            show(ui, &mut st.borrow_mut(), pg); // la nota se ve al momento
+            push_page_notes(ui, &st.borrow());
+            touch_history(&st.borrow());
+            push_history(ui);
+            notify(ui, st, "Nota guardada en la copia de trabajo".into());
+        }
+        Err(e) => notify(ui, st, format!("Error al anotar: {e:#}")),
+    }
+}
+
 fn marker(img: &mut image::RgbaImage, x: f32, y: f32) {
     let (iw, ih) = (img.width() as i64, img.height() as i64);
     for dx in 0..8i64 {
@@ -909,83 +1081,142 @@ fn marker(img: &mut image::RgbaImage, x: f32, y: f32) {
     }
 }
 
-/// Inyecta una nota nativa (sticky-note) en el box del error y guarda
-/// en `{nombre}_anotado.pdf`. Nunca sobreescribe el original.
-fn annotate(st: &State, idx: usize, text: &str) -> anyhow::Result<PathBuf> {
-    let e = st.all_errs.get(idx).context("hallazgo no válido")?;
-    st.path.clone().context("sin documento")?;
-    let text = if text.trim().is_empty() {
+/// Texto de la anotación a partir del hallazgo (o el que escribió el usuario).
+fn note_text(e: &Misspelling, text: &str) -> String {
+    if text.trim().is_empty() {
         format!("Revisar: {} (sugerencias: {})", e.word, e.sug.join(", "))
     } else {
         text.to_string()
-    };
-    let (doc, out) = annotate_base(st)?;
-    let mut pg = doc.pages().get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let mut ann = pg.annotations_mut().create_text_annotation(&text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1))
-        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    save_doc(&doc, &out)?;
-    Ok(out)
-}
-
-/// Anota N hallazgos de una vez (grupo): abre el doc una sola vez.
-/// ponytail: evita N open/save que se pisaban; techo = todo el grupo en memoria, bien para <1000
-fn annotate_many(st: &State, idxs: &[usize], text: &str) -> anyhow::Result<PathBuf> {
-    st.path.clone().context("sin documento")?;
-    anyhow::ensure!(!idxs.is_empty(), "grupo vacío");
-    let (doc, out) = annotate_base(st)?;
-    for idx in idxs {
-        let e = st.all_errs.get(*idx).context("hallazgo no válido")?;
-        let t = if text.trim().is_empty() {
-            format!("Revisar: {} (sugerencias: {})", e.word, e.sug.join(", "))
-        } else {
-            text.to_string()
-        };
-        let mut pg = doc.pages().get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        let mut ann = pg.annotations_mut().create_text_annotation(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1))
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     }
-    save_doc(&doc, &out)?;
+}
+
+/// Abre el PDF (con la contraseña si la hay) y lo deja abierto en el estado.
+/// Devuelve el error de pdfium tal cual (para detectar PasswordError).
+fn open_doc_file(st: &mut State, path: &std::path::Path) -> Result<(), PdfiumError> {
+    let doc = st.pdfium.load_pdf_from_file(path, st.password)?;
+    st.doc = Some(doc);
+    st.doc_from = Some(path.to_path_buf());
+    st.doc_stamp = file_stamp(path);
+    Ok(())
+}
+
+/// ¿El pdfium pide contraseña?
+fn is_password_error(e: &PdfiumError) -> bool {
+    matches!(
+        e,
+        PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+    )
+}
+
+/// Copia el documento a su fichero de trabajo "{nombre}_anotado.pdf"
+/// (0600, atómico). Nunca toca el original.
+fn copy_to_working(src: &std::path::Path) -> anyhow::Result<PathBuf> {
+    let out = working_path(src);
+    let tmp = out.with_extension("tmp.pdf");
+    let r: anyhow::Result<()> = (|| {
+        std::fs::copy(src, &tmp)?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&tmp, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+        std::fs::rename(&tmp, &out)?;
+        Ok(())
+    })();
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r?;
     Ok(out)
 }
 
-/// Nota libre en un punto cualquiera de la página (coords PDF, origen abajo-izq).
-fn annotate_at(st: &State, page: u32, x: f32, y: f32, text: &str) -> anyhow::Result<PathBuf> {
-    anyhow::ensure!(!text.trim().is_empty(), "escribe la nota primero");
-    let (doc, out) = annotate_base(st)?;
-    let mut pg = doc.pages().get(page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let mut ann = pg.annotations_mut().create_text_annotation(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    ann.set_bounds(PdfRect::new_from_values((y - 6.0).max(0.0), (x - 6.0).max(0.0), y + 6.0, x + 6.0))
-        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    save_doc(&doc, &out)?;
-    Ok(out)
+/// Crea la copia de trabajo del documento actual.
+fn create_working_copy(st: &mut State) -> anyhow::Result<PathBuf> {
+    let src = st.path.clone().context("sin documento")?;
+    copy_to_working(&src)
+}
+
+/// Aplica la anotación al documento abierto y la guarda en la copia de
+/// trabajo. Devuelve las notas creadas (para el tooltip).
+/// - reabre el doc si la copia cambió por fuera (no pisar ediciones ajenas)
+/// - guarda vía temporal + rename (Pdfium tiene el fichero mapeado)
+fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNote>> {
+    let out = st.working.clone().context("sin copia de trabajo")?;
+    let stale = st.doc_from.as_deref() != Some(out.as_path()) || st.doc_stamp != file_stamp(&out);
+    if stale {
+        open_doc_file(st, &out).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    }
+    let mut added: Vec<DocNote> = vec![];
+    {
+        let doc = st.doc.as_mut().context("sin documento abierto")?;
+        let pages = doc.pages_mut();
+        match req {
+            AnnotateReq::Error(idx, text) => {
+                let e = st.all_errs.get(*idx).cloned().context("hallazgo no válido")?;
+                let t = note_text(&e, text);
+                let mut pg = pages.get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let mut ann = pg.annotations_mut().create_text_annotation(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                added.push(DocNote { page: e.page, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, text: t });
+            }
+            AnnotateReq::Many(idxs, text) => {
+                anyhow::ensure!(!idxs.is_empty(), "grupo vacío");
+                for idx in idxs {
+                    let e = st.all_errs.get(*idx).cloned().context("hallazgo no válido")?;
+                    let t = note_text(&e, text);
+                    let mut pg = pages.get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    let mut ann = pg.annotations_mut().create_text_annotation(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    added.push(DocNote { page: e.page, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, text: t });
+                }
+            }
+            AnnotateReq::AtPoint(page, x, y, text) => {
+                anyhow::ensure!(!text.trim().is_empty(), "escribe la nota primero");
+                let mut pg = pages.get(*page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let mut ann = pg.annotations_mut().create_text_annotation(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                ann.set_bounds(PdfRect::new_from_values((*y - 6.0).max(0.0), (*x - 6.0).max(0.0), *y + 6.0, *x + 6.0))
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                added.push(DocNote { page: *page, x0: *x, y0: *y, x1: *x, y1: *y, text: text.clone() });
+            }
+        }
+    }
+    let doc = st.doc.as_ref().context("sin documento abierto")?;
+    save_doc(doc, &out)?;
+    Ok(added)
 }
 
 fn show(ui: &AppWindow, st: &mut State, page: u32) {
     let Some(path) = st.path.clone() else { return };
+    // el doc se mantiene abierto: si no lo está (o cambió por fuera), se abre
+    let need_open = st.doc.is_none() || st.doc_from.as_deref() != st.render_from().as_deref();
+    if need_open {
+        let src = st.render_from().unwrap_or_else(|| path.clone());
+        if let Err(e) = open_doc_file(st, &src) {
+            ui.set_popup_text(format!("Error: {e:?}").into());
+            st.popup_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
+            return;
+        }
+    }
+    let s: &State = st;
     let res: anyhow::Result<(Image, u32, Vec<Word>, f32, f32, u32, u32)> = (|| {
-        let doc = st.pdfium.load_pdf_from_file(&path, None).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let doc = s.doc.as_ref().context("sin documento abierto")?;
         let pages = doc.pages();
         let total = pages.len() as u32;
         let pg = pages.get(page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let (pw, ph) = (pg.width().value, pg.height().value);
-        let config = PdfRenderConfig::new().set_target_width((1400.0 * st.zoom) as i32);
+        let config = PdfRenderConfig::new().set_target_width((1400.0 * s.zoom) as i32);
         let mut rgba = pg.render_with_config(&config).map_err(|e| anyhow::anyhow!("{e:?}"))?
             .as_image().as_rgba8().context("pdfium no devolvió RGBA")?.clone();
         let (iw, ih) = (rgba.width(), rgba.height());
-        for h in st.all_errs.iter().filter(|e| e.page == page && !e.dismissed) {
+        for h in s.all_errs.iter().filter(|e| e.page == page && !e.dismissed) {
             let (x, y, w, hh) = pdf_to_image(h.x0, h.y0, h.x1, h.y1, pw, ph, iw, ih);
             underline(&mut rgba, x, y + hh - 3.0, w, under_color(&h.kind));
         }
-        for n in st.doc_notes.iter().filter(|n| n.page == page) {
+        for n in s.doc_notes.iter().filter(|n| n.page == page) {
             let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
             marker(&mut rgba, x, y);
         }
         // flash amarillo 5s del error clicado
-        if let Some((fi, t)) = &st.flash {
+        if let Some((fi, t)) = &s.flash {
             if t.elapsed() < std::time::Duration::from_secs(5) {
-                if let Some(h) = st.all_errs.get(*fi) {
+                if let Some(h) = s.all_errs.get(*fi) {
                     if h.page == page && !h.dismissed {
                         let (x, y, w, hh) = pdf_to_image(h.x0, h.y0, h.x1, h.y1, pw, ph, iw, ih);
                         wash(&mut rgba, x, y, w, hh);
@@ -1015,22 +1246,7 @@ fn show(ui: &AppWindow, st: &mut State, page: u32) {
             ui.set_img_w(iw as i32);
             ui.set_img_h(ih as i32);
             st.words = words;
-            // notas nativas de esta página: el Slint pone el tooltip al pasar el ratón
-            let pn: Vec<NoteRow> = st
-                .doc_notes
-                .iter()
-                .filter(|n| n.page == page)
-                .map(|n| {
-                    let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
-                    let mut t: String = n.text.chars().take(200).collect();
-                    if n.text.chars().count() > 200 {
-                        t.push('…');
-                    }
-                    NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y }
-                })
-                .collect();
-            ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
-            ui.set_note_total(st.doc_notes.len() as i32);
+            push_page_notes(ui, st);
         }
         Err(e) => {
             ui.set_popup_text(format!("Error: {e:#}").into());
@@ -1039,7 +1255,41 @@ fn show(ui: &AppWindow, st: &mut State, page: u32) {
     }
 }
 
-fn load_pdfium() -> Pdfium {
+/// Notas de la página visible (el Slint pone el tooltip al pasar el ratón).
+fn push_page_notes(ui: &AppWindow, st: &State) {
+    let (pw, ph, iw, ih, page) = (st.page_w, st.page_h, st.img_w, st.img_h, st.page);
+    if iw == 0 || ih == 0 {
+        return;
+    }
+    let pn: Vec<NoteRow> = st
+        .doc_notes
+        .iter()
+        .filter(|n| n.page == page)
+        .map(|n| {
+            let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
+            let mut t: String = n.text.chars().take(200).collect();
+            if n.text.chars().count() > 200 {
+                t.push('…');
+            }
+            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y }
+        })
+        .collect();
+    ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
+    ui.set_note_total(st.doc_notes.len() as i32);
+}
+
+impl State {
+    /// De dónde se lee y se renderiza: la copia de trabajo si existe.
+    fn render_from(&self) -> Option<PathBuf> {
+        self.working.clone().or_else(|| self.path.clone())
+    }
+}
+
+fn load_pdfium() -> &'static Pdfium {
+    PDFIUM.with(|p| *p)
+}
+
+fn bind_pdfium() -> Pdfium {
     let lib = if cfg!(target_os = "windows") {
         "pdfium.dll"
     } else {
@@ -1075,10 +1325,18 @@ fn main() -> anyhow::Result<()> {
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
+    // aviso de privacidad: el texto se revisa en local, no sale del PC
+    ui.set_popup_text("El texto de cada página se revisa con LanguageTool en este PC: no sale a Internet.".into());
     let (tx, rx) = channel::<SpellMsg>();
     let st = Rc::new(RefCell::new(State {
         pdfium: load_pdfium(),
+        doc: None,
+        doc_from: None,
+        doc_stamp: None,
         path: None,
+        working: None,
+        password: None,
+        dlg_pending: None,
         page: 0,
         total: 0,
         words: vec![],
@@ -1123,7 +1381,7 @@ fn main() -> anyhow::Result<()> {
                     SpellEvent::LtReady(child) => {
                         st.borrow_mut().lt_ready = true;
                         st.borrow_mut().lt_child = child;
-                        ui.set_lt_status("Motor: listo (local :8081).".into());
+                        ui.set_lt_status("Motor: listo (local, sin red).".into());
                         notify(&ui, &st, "Revisión lista (LanguageTool local).".into());
                     }
                     SpellEvent::LtFail(msg) => {
@@ -1304,16 +1562,9 @@ fn main() -> anyhow::Result<()> {
             let Some(ui) = ui_weak.upgrade() else { return };
             let text = ui.get_free_note_text().to_string();
             let pt = st.borrow().free_pt;
-            let res = match pt {
-                Some((pg, x, y)) => annotate_at(&st.borrow(), pg, x, y, &text),
-                None => Err(anyhow::anyhow!("toca primero el punto del PDF")),
-            };
-            match res {
-                Ok(out) => {
-                    notify(&ui, &st, format!("Nota guardada en {} (reabre ese archivo para verla)", out.display()));
-                    refresh_notes(&ui, &st);
-                }
-                Err(e) => notify(&ui, &st, format!("Error al anotar: {e:#}")),
+            match pt {
+                Some((pg, x, y)) => apply_note(&ui, &st, AnnotateReq::AtPoint(pg, x, y, text)),
+                None => notify(&ui, &st, "Toca primero el punto del PDF".into()),
             }
             ui.set_free_note_on(false);
         });
@@ -1464,24 +1715,18 @@ fn main() -> anyhow::Result<()> {
             let Some(ui) = ui_weak.upgrade() else { return };
             let text = ui.get_note_text().to_string();
             let group = st.borrow().view_group.get(i as usize).cloned().flatten();
-            let res = if let Some(w) = group {
+            let req = if let Some(w) = group {
                 let idxs: Vec<usize> = st.borrow().all_errs.iter().enumerate()
                     .filter(|(_, e)| e.word == w).map(|(gi, _)| gi).collect();
-                annotate_many(&st.borrow(), &idxs, &text)
+                AnnotateReq::Many(idxs, text)
             } else {
                 let gi = match st.borrow().view.get(i as usize) {
                     Some(g) => *g,
                     None => return,
                 };
-                annotate(&st.borrow(), gi, &text)
+                AnnotateReq::Error(gi, text)
             };
-            match res {
-                Ok(out) => {
-                    notify(&ui, &st, format!("Nota guardada en {} (reabre ese archivo para verla)", out.display()));
-                    refresh_notes(&ui, &st);
-                }
-                Err(e) => notify(&ui, &st, format!("Error al anotar: {e:#}")),
-            }
+            apply_note(&ui, &st, req);
             ui.set_selected_note(-1);
         });
     }
@@ -1512,20 +1757,72 @@ fn main() -> anyhow::Result<()> {
             let res = if let Some(w) = group {
                 let idxs: Vec<usize> = st.borrow().all_errs.iter().enumerate()
                     .filter(|(_, e)| e.word == w).map(|(gi, _)| gi).collect();
-                annotate_many(&st.borrow(), &idxs, &text)
+                AnnotateReq::Many(idxs, text)
             } else {
                 let gi = match st.borrow().view.get(i as usize) {
                     Some(g) => *g,
                     None => return,
                 };
-                annotate(&st.borrow(), gi, &text)
+                AnnotateReq::Error(gi, text)
             };
-            match res {
-                Ok(out) => {
-                    notify(&ui, &st, format!("Observación guardada en {} (reabre ese archivo para verla)", out.display()));
-                    refresh_notes(&ui, &st);
+            apply_note(&ui, &st, res);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_dlg_answer(move |yes| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            ui.set_dlg_open(false);
+            let pending = st.borrow_mut().dlg_pending.take();
+            match pending {
+                Some(Pending::OpenWithPassword(path)) => {
+                    if !yes {
+                        return;
+                    }
+                    let pass = ui.get_dlg_pass().to_string();
+                    if pass.is_empty() {
+                        notify(&ui, &st, "Contraseña vacía".into());
+                        return;
+                    }
+                    st.borrow_mut().password = Some(leak_secret(&pass));
+                    let src = st.borrow().render_from().unwrap_or_else(|| path.clone());
+                    match open_doc_file(&mut st.borrow_mut(), &src) {
+                        Ok(()) => finish_open(&ui, &st, &path),
+                        Err(e) if is_password_error(&e) => {
+                            show_dlg(&ui, 1, "PDF con contraseña", "Contraseña incorrecta. Inténtalo otra vez.");
+                            st.borrow_mut().dlg_pending = Some(Pending::OpenWithPassword(path));
+                        }
+                        Err(e) => notify(&ui, &st, format!("No se pudo abrir: {e:?}")),
+                    }
                 }
-                Err(e) => notify(&ui, &st, format!("Error al anotar: {e:#}")),
+                Some(Pending::CreateCopy) => {
+                    if !yes {
+                        notify(&ui, &st, "Sin copia de trabajo no se pueden guardar notas".into());
+                        return;
+                    }
+                    match make_working(&st) {
+                        Ok(()) => {
+                            let pg = st.borrow().page;
+                            show(&ui, &mut st.borrow_mut(), pg);
+                            push_page_notes(&ui, &st.borrow());
+                            notify(&ui, &st, "Copia de trabajo lista: las notas se guardarán ahí".into());
+                        }
+                        Err(e) => notify(&ui, &st, format!("No se pudo crear la copia: {e:#}")),
+                    }
+                }
+                Some(Pending::CreateCopyThenNote(req)) => {
+                    if !yes {
+                        notify(&ui, &st, "Sin copia de trabajo no se puede guardar la nota".into());
+                        return;
+                    }
+                    if let Err(e) = make_working(&st) {
+                        notify(&ui, &st, format!("No se pudo crear la copia: {e:#}"));
+                        return;
+                    }
+                    apply_note(&ui, &st, req);
+                }
+                None => {}
             }
         });
     }
@@ -1595,22 +1892,23 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // sidecar LanguageTool: SOLO el hijo propio. Un :8081 ajeno recibiría el
-    // texto íntegro del PDF, así que ocupado = sin revisión (fail-closed).
+    // sidecar LanguageTool: SOLO el hijo propio, en un puerto libre elegido al
+    // arrancar (así ningún proceso ajeno puede interceptar el texto) y con el
+    // JVM encerrado: cualquier salida HTTP del LT va a un puerto muerto.
     // ponytail: el Child viaja por el canal al hilo UI; los hilos de página solo hacen HTTP
     {
         let tx = st.borrow().tx.clone();
         std::thread::spawn(move || {
-            // sonda de propiedad: si no podemos atar el puerto, alguien lo ocupa
-            if std::net::TcpListener::bind(("127.0.0.1", LT_PORT)).is_err() {
-                let _ = tx.send(SpellEvent::LtFail("puerto 8081 ocupado por un proceso ajeno: sin revisión (cierra el otro programa y reabre)".into()));
-                return;
-            }
             let Some(dir) = lt_dir() else {
                 let _ = tx.send(SpellEvent::LtFail("no se encontró assets/lt (¿falló la descarga en build?)".into()));
                 return;
             };
             let jar = dir.join("languagetool-server.jar");
+            // hasta 3 intentos: si el puerto elegido lo captura alguien, otro
+            for _intento in 0..3 {
+            // puerto libre en loopback para este hijo
+            let port = free_port();
+            LT_PORT.store(port, std::sync::atomic::Ordering::Relaxed);
             let mut cmd = java_cmd();
             #[cfg(windows)]
             {
@@ -1619,10 +1917,16 @@ fn main() -> anyhow::Result<()> {
                 cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
             let child = cmd
-                .args(["-Xms256m", "-Xmx1g", "-Dfile.encoding=UTF-8", "-cp"])
+                .args(["-Xms256m", "-Xmx1g", "-Dfile.encoding=UTF-8"])
+                // encerrado: el proxy del JVM apunta a un puerto muerto, así que
+                // el LT no puede salir a Internet (loopback queda directo)
+                .args(["-Dhttp.proxyHost=127.0.0.1", "-Dhttp.proxyPort=1"])
+                .args(["-Dhttps.proxyHost=127.0.0.1", "-Dhttps.proxyPort=1"])
+                .args(["-Dhttp.nonProxyHosts=127.0.0.1|localhost|[::1]"])
+                .args(["-cp"])
                 .arg(&jar)
                 .arg("org.languagetool.server.HTTPServer")
-                .args(["--port", &LT_PORT.to_string()])
+                .args(["--port", &port.to_string()])
                 .current_dir(&dir)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -1650,10 +1954,11 @@ fn main() -> anyhow::Result<()> {
             }
             if ok {
                 let _ = tx.send(SpellEvent::LtReady(Some(child)));
-            } else {
-                let _ = child.kill();
-                let _ = tx.send(SpellEvent::LtFail("el servidor LT no respondió a tiempo".into()));
+                return;
             }
+            let _ = child.kill();
+            } // fin de los intentos
+            let _ = tx.send(SpellEvent::LtFail("el servidor LT no respondió a tiempo".into()));
         });
     }
 
@@ -1823,38 +2128,69 @@ mod tests {
         assert!(p[2] > p[0]); // morado, no rojo
         assert_eq!(under_color("Ortografía"), (211, 47, 47));
     }
-    #[test]
-    fn notes_roundtrip() {
-        let src = fixture_pdf();
+    /// Estado mínimo para tests (sin UI). Ojo: usar Pdfium cuelga si se
+    /// instancea dos veces (un solo test debe tocarlo).
+    fn state_for(path: PathBuf, zoom: f32) -> State {
         let (tx, _rx) = channel::<SpellMsg>();
-        let st = State {
-            pdfium: load_pdfium(), path: Some(src.clone()), page: 0, total: 3,
+        State {
+            pdfium: load_pdfium(),
+            doc: None, doc_from: None, doc_stamp: None,
+            path: Some(path), working: None, password: None, dlg_pending: None,
+            page: 0, total: 3,
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 0.5, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
         syn_received: false, lt_child: None,
-        };
-        annotate(&st, 0, "nota redonda").unwrap();
-        let out = src.with_file_name("doc3_anotado.pdf");
-        let notes = read_notes(&st.pdfium, &out);
-        assert!(notes.iter().any(|n| n.text.contains("nota redonda") && n.page == 0));
+        }
     }
+
+    /// Un solo test toca Pdfium (instanciarlo dos veces se cuelga).
     #[test]
-    fn annotate_creates_sibling_file() {
-        // ponytail: usa /tmp/doc3.pdf generado en dev; si falta, el test falla explícito
+    fn anotacion_en_copia_de_trabajo() {
         let src = fixture_pdf();
-        let (tx, _rx) = channel::<SpellMsg>();
-        let st = State {
-            pdfium: load_pdfium(), path: Some(src), page: 0, total: 3,
-            words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
-            all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedio".into() }],
-            doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom: 1.0, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
-        syn_received: false, lt_child: None,
-        };
-        let out = annotate(&st, 0, "nota de prueba").unwrap();
+        let mut st = state_for(src.clone(), 1.0);
+        // la copia de trabajo se crea y es privada
+        let out = create_working_copy(&mut st).unwrap();
         assert_eq!(out.file_name().unwrap(), "doc3_anotado.pdf");
         assert!(out.metadata().unwrap().len() > 500);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "la copia de trabajo debe ser solo del usuario");
+        }
+        // se anota sobre el documento abierto y se guarda al momento
+        st.working = Some(out.clone());
+        open_doc_file(&mut st, &out).unwrap();
+        let added = annotate_open(&mut st, &AnnotateReq::Error(0, "nota redonda".into())).unwrap();
+        assert_eq!(added.len(), 1);
+        // la nota se lee del fichero guardado (roundtrip)
+        let notes = read_notes(st.pdfium, &out);
+        assert!(notes.iter().any(|n| n.text.contains("nota redonda") && n.page == 0));
+    }
+
+    #[test]
+    fn working_path_never_doubles_the_suffix() {
+        assert_eq!(working_path(std::path::Path::new("/tmp/doc.pdf")), PathBuf::from("/tmp/doc_anotado.pdf"));
+        // ya es copia de trabajo: se usa tal cual (nada de _anotado_anotado)
+        assert_eq!(working_path(std::path::Path::new("/tmp/doc_anotado.pdf")), PathBuf::from("/tmp/doc_anotado.pdf"));
+        assert_eq!(working_path(std::path::Path::new("/tmp/doc_anotado_anotado.pdf")), PathBuf::from("/tmp/doc_anotado_anotado.pdf"));
+    }
+
+    #[test]
+    fn working_copy_is_private() {
+        // nombre propio: los tests corren en paralelo y comparten /tmp
+        let src = std::path::PathBuf::from("/tmp/doc3_priv.pdf");
+        std::fs::copy(fixture_pdf(), &src).unwrap();
+        let out = copy_to_working(&src).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "la copia de trabajo debe ser solo del usuario");
+        }
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&src);
     }
 }

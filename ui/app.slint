@@ -111,6 +111,12 @@ export component AppWindow inherits Window {
     in-out property <[ErrRow]> errors;
     in-out property <[NoteRow]> page-notes;
     in-out property <int> note-total: 0;
+    // diálogo modal propio: 0 = confirmar (Sí/No) · 1 = contraseña
+    in-out property <int> dlg-kind: 0;
+    in-out property <string> dlg-title: "";
+    in-out property <string> dlg-msg: "";
+    in-out property <string> dlg-pass: "";
+    in-out property <bool> dlg-open: false;
     in-out property <[HisRow]> history;
     in-out property <string> spell-status: "";
     in-out property <bool> is-dark: false;
@@ -156,6 +162,7 @@ export component AppWindow inherits Window {
     callback free-note-cancel();
     callback lang-set(int);
     callback theme-toggle();
+    callback dlg-answer(bool);
 
     // paleta según tema (fija, no depende del tema del SO)
     property <color> c-bg: root.is-dark ? #1e1e1e : white;
@@ -196,6 +203,46 @@ export component AppWindow inherits Window {
                             horizontal-alignment: center; vertical-alignment: center;
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.theme-toggle(); } }
+                    }
+                }
+
+                // diálogo propio (copia de trabajo / contraseña): va arriba en la
+                // barra lateral para que se vea sin scroll.
+                if (root.dlg-open): Rectangle {
+                    background: root.c-card;
+                    border-color: root.c-accent; border-width: 1px; border-radius: 6px;
+                    VerticalLayout {
+                        padding: 10px; spacing: 6px;
+                        Text {
+                            text: root.dlg-title; font-size: 14px; font-weight: 700;
+                            color: root.c-fg; wrap: word-wrap;
+                        }
+                        Text { text: root.dlg-msg; font-size: 12px; color: root.c-dim; wrap: word-wrap; }
+                        if (root.dlg-kind == 1): Rectangle {
+                            height: 30px;
+                            background: root.c-pill; border-radius: 4px;
+                            TextInput {
+                                x: 8px; width: parent.width - 16px; height: parent.height;
+                                text <=> root.dlg-pass;
+                                font-size: 13px; color: root.c-fg;
+                                input-type: password;
+                                vertical-alignment: center;
+                                accepted => { root.dlg-answer(true); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            MiniBtn {
+                                label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
+                                bg: root.c-pill; fg: root.c-fg;
+                                clicked => { root.dlg-answer(false); }
+                            }
+                            MiniBtn {
+                                label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
+                                bg: root.c-accent; fg: root.c-accent-fg;
+                                clicked => { root.dlg-answer(true); }
+                            }
+                        }
                     }
                 }
 

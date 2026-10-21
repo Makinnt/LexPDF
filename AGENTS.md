@@ -94,6 +94,11 @@ Flujos:
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
   24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
   de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
+- **Diálogo propio** (copia de trabajo / contraseña) en la barra lateral, arriba:
+  `dlg-open/dlg-kind/dlg-msg/dlg-pass` + callback `dlg-answer(bool)`. Va en la
+  sidebar, **no** como overlay: un `Rectangle` a pantalla completa dentro del
+  `Window` crea un bucle de layout (`root.layoutinfo-v`) que Slint marca como
+  deprecated y puede petar en runtime.
 - `Flickable + VerticalLayout + for` para la lista (no `ListView` de std-widgets).
 - Cards: franja de color por gravedad + palabra + tipo/gravedad/pág +
   descripción ES/EN + sugerencias LT (`No hay sugerencias` si vacío) +
@@ -107,6 +112,8 @@ Flujos:
 
 - **No crear segundo `Pdfium` en otro hilo**: se cuelga en `bind`. Por eso el
   escaneo es troceado en el hilo UI y los hilos de página son solo HTTP.
+  El `Pdfium` se filtra a 'static (`Box::leak`) y se comparte con
+  `thread_local!`: una sola instancia viva en todo el proceso.
 - Guardar sobre el `_anotado.pdf` abierto lo mapea Pdfium (SIGTRAP): se guarda
   vía temporal+rename (`save_doc`).
 - En Slint `visible: false` sigue reservando layout: para mostrar/ocultar se
@@ -122,17 +129,50 @@ Fase 5 (revisión 100% LT: `kind`=Ortografía|Sintaxis + `sev` mínima|intermedi
 Tipo+Gravedad —inline, sin std-widgets—, omitir en cascada por solape de boxes
 + limpieza de flash, barra única vía `refresh_progress`, subrayado por clase (rojo
 ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `Nota`
-(icono `note_add`, panel sobre la página visible → `annotate_at`), notas acumulativas sobre
-`_anotado.pdf` (guardado vía temporal+rename — Pdfium mapea el archivo), sidecar java hijo —reutiliza externo
- en :8081—, `LtReady/LtFail/Syn(gen)` con `scan_id`, hilos de página solo HTTP
+(icono `note_add`, panel sobre la página visible → `annotate_open`), notas acumulativas sobre
+`_anotado.pdf` (guardado vía temporal+rename — Pdfium mapea el archivo), sidecar java hijo en
+ un puerto libre por ejecución (JVM encerrado: el proxy apunta a un puerto muerto
+ → el LT no sale a Internet), `LtReady/LtFail/Syn(gen)` con `scan_id`, hilos de página solo HTTP
  con palabras clonadas —nunca Pdfium en hilos—, offsets en chars → box unión
- vía `join_words`/`span_to_box`; notas existentes leídas (`read_notes` →
+ vía `join_words`/`span_to_box`; notas existentes leídas (`notes_of` →
  marcadores ámbar + tooltip al pasar el ratón por encima, sin lista); historial 10 últimos en
  `~/.config/lexpdf/history.json` (errores/omitidos/notas + % revisado,
  sección Recientes → `open_doc`); `build.rs` descarga LT ~240MB a `assets/lt/`
  gitignoreado —requiere red en build y Java 17+ en runtime—; medido: arranque
 -`~4s, ~80ms/check, ~650MB RAM). `cargo test` rápido (sin motores pesados en tests).
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
+
+## Modelo de amenazas (qué sale del PC)
+
+- El **PDF nunca sale** del proceso. Lo único que viaja es el *texto* de cada
+  página, al sidecar LanguageTool por **loopback** (`127.0.0.1`, puerto libre
+  elegido en cada ejecución → ningún proceso ajeno puede interceptarlo).
+- El **JVM del LT está encerrado**: `-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=1`
+  (+https) → cualquier salida HTTP del LT muere en un puerto muerto.
+  `http.nonProxyHosts` deja el loopback directo.
+- `ureq` va **sin TLS**: no puede ni hablar https. El tripwire
+  `is_loopback_url` (test) aborta el proceso si la URL se sale de loopback.
+- Ficheros con datos sensibles: la copia de trabajo y el historial van **0600**
+  (y `~/.config/lexpdf` en 0700).
+- **Salvedades honestas**: el texto de cada página está en la memoria del
+  proceso java (si alguien compromete la máquina, está comprometido); las
+  notas se guardan **en claro dentro del PDF** (cifrar el PDF no está en el
+  alcance); un PDF con contraseña de *permisos* no admite notas.
+- La **contraseña** del PDF se pide una vez, vive solo en memoria (`&'static
+  filtrado`) y nunca se escribe en disco ni en el historial.
+
+## Copia de trabajo (`_anotado`)
+
+- Al abrir un documento: si existe `{nombre}_anotado.pdf` se usa (nunca se crea
+  un `_anotado_anotado`: `working_path()` no duplica el sufijo). Si no existe, se
+  pregunta en un diálogo de la barra lateral ("Copia de trabajo").
+- Las notas se **guardan al momento** en esa copia (temp + rename, 0600) y se
+  ven al instante: el documento queda abierto en memoria (`State.doc`), las
+  anotaciones se aplican sobre él y se repinta la página.
+- Antes de guardar se compara `mtime`+tamaño del fichero: si cambió por fuera
+  (otra app lo editó) se reabre para **no pisar** esa edición.
+- El **historial guarda siempre la ruta original** → al reabrir desde
+  "Recientes" se reutiliza la misma copia de trabajo.
 Windows: `installer/windows/` (Inno + `stage.ps1` + CI con SignPath opt-in);
 java en `$JAVA_BIN` → `jre\` junto al exe → `PATH`.
 Linux/AppImage: `installer/linux/` (`stage-appimage.sh` → AppDir + AppRun con
