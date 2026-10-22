@@ -91,6 +91,22 @@ Flujos:
 - Iconos = **Material Icons Outlined 24px** (Apache-2.0) como `Path { commands: ... }`
   (path SVG tal cual, `viewBox 0 0 24 24`; `fill: root.c-fg` para que siga el tema).
   Componentes `Icon*` al tope de `ui/app.slint`; licencia en `assets/icons/`.
+- **Anotaciones**: `Note` (sticky, botón "Nota") y `Highlight` (resaltado + comentario).
+  Los resaltados se crean con pdfium (rect + `/Contents`) y **lopdf parchea el
+  fichero** para añadir `/QuadPoints` y `/CA 0.4`: pdfium-render no expone
+  `set_quad_points` y sin ellos **el resaltado no se ve en ningún lector**.
+  Gotchas de lopdf: las páginas van numeradas desde 1, pdfium guarda las
+  anotaciones *inline* en `/Annots` (hay que reescribir el array) y
+  `Object::get` choca con el prelude de pdfium (usar `Object::Dictionary(d)`).
+  El parcheo se escribe a un temporal y se renombra (pdfium tiene el fichero
+  mapeado: reescribirlo in situ lo rompe).
+- **Herramientas** (barra superior): 0 normal · 1 nota · 2 resaltar (arrastrar) ·
+  3 borrar. El borrado se puede hacer desde la barra (pinchar el marcador) o
+  desde la card del error (botón "Borrar", solo si tiene anotación).
+- **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
+  `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
+  (preguntar/siempre/nunca), motor de revisión on/off y licencias. Se guardan
+  en `~/.config/lexpdf/settings.json` (0600).
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
   24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
   de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
@@ -178,10 +194,11 @@ Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Ap
 
 - Al abrir un documento: si existe `{nombre}_anotado.pdf` se usa (nunca se crea
   un `_anotado_anotado`: `working_path()` no duplica el sufijo). Si no existe, se
-  pregunta en un diálogo de la barra lateral ("Copia de trabajo").
-- Las notas se **guardan al momento** en esa copia (temp + rename, 0600) y se
-  ven al instante: el documento queda abierto en memoria (`State.doc`), las
-  anotaciones se aplican sobre él y se repinta la página.
+  pregunta en un diálogo de la barra lateral ("Copia de trabajo") salvo que en
+  Ajustes esté en "crear siempre" o "nunca".
+- Las notas y los resaltados se **guardan al momento** en esa copia (temp + rename,
+  0600) y se ven al instante: el documento queda abierto en memoria (`State.doc`),
+  las anotaciones se aplican sobre él y se repinta la página.
 - Antes de guardar se compara `mtime`+tamaño del fichero: si cambió por fuera
   (otra app lo editó) se reabre para **no pisar** esa edición.
 - El **historial guarda siempre la ruta original** → al reabrir desde

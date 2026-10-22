@@ -56,10 +56,13 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   con dos desplegables para filtrar.
 - **Omitir / restaurar** (en cascada si se solapa con otra clase) y agrupar errores
   repetidos (×5+) para no ver 40 veces la misma falta.
-- **Notas nativas**: al pasar el ratón por un marcador ámbar sale un tooltip con el
-  texto de esa nota. Se guardan en `{nombre}_anotado.pdf`; **el original no se toca
-  nunca**.
-- Nota libre en cualquier punto de la página.
+- **Resaltados + comentarios** de verdad: al comentar un error se escribe una
+  anotación `Highlight` en el PDF con su comentario, y se ve en **cualquier
+  lector** (no solo aquí). Se borran desde la propia card o con el 🗑 de la barra.
+- **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
+  visor. Al pasar el ratón por un marcador sale un tooltip con su texto.
+- Todo eso vive en `{nombre}_anotado.pdf`; **el original no se toca nunca**.
+- **Resaltar texto libre**: el botón 🖌 de la barra y arrastras el rectángulo.
 - Tema claro/oscuro (`PDF_DARK=1` para arrancar en oscuro).
 - Apertura directa por argumento: `cargo run -- doc.pdf`.
 
@@ -79,7 +82,7 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
 cargo run -- /ruta/doc.pdf      # abre directo, sin diálogo
 cargo run                        # sin argumento: eliges el PDF
 PDF_DARK=1 cargo run -- doc.pdf  # arranca en oscuro
-cargo test --bin lexpdf          # 16 tests, rápido
+cargo test --bin lexpdf          # 17 tests, rápido
 cargo build                      # debug; ~400 MB por Slint, es normal
 ```
 
@@ -100,6 +103,7 @@ vuelve a preguntar (el texto **no** se pierde).
 - PDF con **PDFium** vía `pdfium-render` 0.8 (binarios en `assets/pdfium/`).
 - Ortografía y sintaxis con **LanguageTool 6.x** (sidecar Java hijo) + `ureq` 3 sync.
 - Iconos **Material Icons Outlined** (Apache-2.0), incrustados como `Path` SVG.
+- `lopdf` para escribir los `/QuadPoints` de los resaltados (pdfium no puede).
 
 ## Estructura
 
@@ -175,6 +179,19 @@ Y lo que **no** podemos prometerte:
 - Si tocas la UI, recuerda las dos reglas de Slint que más caro salen: el `TouchArea`
   va *después* del contenido (si no, se come los clics) y los `Text` necesitan
   `width/height` explícitos para poder centrase.
+
+## Ajustes
+
+El botón ⚙ de la barra abre una ventana aparte con:
+
+- **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o amarillo único.
+- **Copia de trabajo**: preguntar al abrir / crearla siempre / nunca. Ahí van a parar
+  las notas y los resaltados.
+- **Motor de revisión**: activado (el texto se revisa en local) o desactivado (no se
+  envía ni una palabra a ningún proceso).
+- **Licencias** de todo lo que lleva dentro (Slint, PDFium, LanguageTool, Material Icons).
+
+Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 
 ## Licencia
 

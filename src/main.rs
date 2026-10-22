@@ -35,6 +35,9 @@ struct State {
     doc_stamp: Option<(i64, u64)>,       // (mtime, tamaño) al abrir: si cambia, se reabre
     path: Option<PathBuf>,               // el documento que abrió el usuario (historial)
     working: Option<PathBuf>,            // copia de trabajo "{nombre}_anotado.pdf"
+    settings: Settings,                  // ajustes del usuario (ventana aparte)
+    err_anno: HashMap<usize, usize>,     // idx de all_errs -> idx de doc_notes (para borrar)
+    free_rect: Option<(u32, f32, f32, f32, f32)>, // resaltado libre pendiente: pág, x0,y0,x1,y1
     password: Option<&'static str>,      // solo en memoria, nunca en disco
     dlg_pending: Option<Pending>,        // acción pendiente de un diálogo
     page: u32,
@@ -78,9 +81,19 @@ enum Pending {
 /// Anotación a crear (se aplica al documento abierto).
 #[derive(Clone)]
 enum AnnotateReq {
-    Error(usize, String),            // índice en all_errs + texto
-    Many(Vec<usize>, String),        // grupo de hallazgos + texto
-    AtPoint(u32, f32, f32, String),  // página, x, y (puntos PDF) + texto
+    /// Resaltado + comentario sobre la palabra de uno o varios hallazgos.
+    Highlight(Vec<usize>, String),
+    /// Nota adhesiva libre (sticky note) en un punto.
+    Note(u32, f32, f32, String),
+    /// Resaltado libre sobre un rectángulo (página, x0, y0, x1, y1).
+    HighlightRect(u32, f32, f32, f32, f32, String),
+}
+
+/// Tipo de anotación nativa del PDF.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AnnoKind {
+    Note,      // sticky note (Text)
+    Highlight, // resaltado (Highlight) con comentario
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +104,7 @@ struct DocNote {
     x1: f32,
     y1: f32,
     text: String,
+    kind: AnnoKind,
 }
 
 #[derive(Clone, Debug)]
@@ -434,9 +448,9 @@ fn err_order(a: &Misspelling, b: &Misspelling) -> std::cmp::Ordering {
 
 fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
     let en = ui.get_lang_idx() == 1;
-    let (all, expanded) = {
+    let (all, expanded, err_anno) = {
         let s = st.borrow();
-        (s.all_errs.clone(), s.expanded.clone())
+        (s.all_errs.clone(), s.expanded.clone(), s.err_anno.clone())
     };
     // índices filtrados en orden de aparición
     // tipo: 0 todas · 1 ortografía · 2 sintaxis | sev: 0 todas · 1 grave · 2 intermedia · 3 mínima
@@ -499,6 +513,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 desc: (if en { format!("Repeated {n} times — comment/reject applies to all") } else { format!("Se repite {n} veces — comentar/rechazar aplica a todas") }).into(),
                 count: n as i32,
                 is_group: true,
+                has_anno: all.iter().enumerate().any(|(k, x)| x.word == e.word && err_anno.contains_key(&k)),
             });
         } else {
             view.push(gi);
@@ -518,6 +533,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 desc: desc_for(&e.kind, en).into(),
                 count: n as i32,
                 is_group: false,
+                has_anno: err_anno.contains_key(&gi),
             });
         }
     }
@@ -810,16 +826,18 @@ fn read_notes(pdfium: &Pdfium, path: &PathBuf) -> Vec<DocNote> {
     notes_of(&doc)
 }
 
-/// Las sticky-notes de un documento ya abierto.
+/// Las anotaciones de un documento abierto (sticky notes y resaltados).
 fn notes_of(doc: &PdfDocument) -> Vec<DocNote> {
     let mut out = vec![];
     let pages = doc.pages();
     for i in 0..pages.len() {
         let Ok(pg) = pages.get(i) else { continue };
         for ann in pg.annotations().iter() {
-            if ann.annotation_type() != PdfPageAnnotationType::Text {
-                continue;
-            }
+            let kind = match ann.annotation_type() {
+                PdfPageAnnotationType::Text => AnnoKind::Note,
+                PdfPageAnnotationType::Highlight => AnnoKind::Highlight,
+                _ => continue,
+            };
             let Some(text) = ann.contents() else { continue };
             if text.trim().is_empty() {
                 continue;
@@ -828,7 +846,7 @@ fn notes_of(doc: &PdfDocument) -> Vec<DocNote> {
                 Ok(b) => (b.left().value, b.bottom().value, b.right().value, b.top().value),
                 Err(_) => continue,
             };
-            out.push(DocNote { page: i as u32, x0, y0, x1, y1, text });
+            out.push(DocNote { page: i as u32, x0, y0, x1, y1, text, kind });
         }
     }
     out
@@ -936,6 +954,132 @@ fn push_history(ui: &AppWindow) {
     ui.set_history(ModelRc::new(VecModel::from_slice(&rows)));
 }
 
+/// Ajustes del usuario (ventana aparte). Se guardan en
+/// `~/.config/lexpdf/settings.json` (0600, como el historial).
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Settings {
+    /// 0 = color por gravedad (rojo/morado) · 1 = amarillo único
+    hl_color: u8,
+    /// 0 = preguntar al abrir · 1 = crear siempre · 2 = nunca
+    copy_mode: u8,
+    /// false = no se envía texto a ningún motor (sin revisión)
+    motor: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { hl_color: 0, copy_mode: 0, motor: true }
+    }
+}
+
+fn settings_file() -> Option<PathBuf> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    Some(PathBuf::from(home).join(".config/lexpdf/settings.json"))
+}
+
+fn load_settings() -> Settings {
+    let Some(f) = settings_file() else { return Settings::default() };
+    let Ok(b) = std::fs::read_to_string(&f) else { return Settings::default() };
+    serde_json::from_str(&b).unwrap_or_default()
+}
+
+fn save_settings(s: &Settings) {
+    let Some(f) = settings_file() else { return };
+    if let Some(dir) = f.parent() {
+        let _ = std::fs::create_dir_all(dir);
+        #[cfg(unix)]
+        let _ = std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700));
+    }
+    let _ = std::fs::write(&f, serde_json::to_string(s).unwrap_or_default());
+    #[cfg(unix)]
+    let _ = std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+}
+
+/// Parchea los resaltados recién creados: pdfium no puede poner los
+/// `/QuadPoints` (sin ellos no se dibuja el resaltado en ningún lector) ni la
+/// transparencia. lopdf mete ambas cosas en el fichero ya guardado.
+/// Gotchas: lopdf numera las páginas desde 1 y pdfium guarda las anotaciones
+/// *inline* en el array /Annots (hay que reescribir el array).
+fn patch_highlights(path: &std::path::Path, rects: &[(u32, [f32; 4])]) -> anyhow::Result<usize> {
+    if rects.is_empty() {
+        return Ok(0);
+    }
+    let mut doc = lopdf::Document::load(path)?;
+    let pages = doc.get_pages();
+    let mut patched = 0;
+    for (page_no, rect) in rects {
+        let Some(page_id) = pages.get(&(*page_no + 1)) else { continue };
+        let page_obj = doc.get_object(*page_id)?;
+        let Some(lopdf::Object::Array(list)) = lget(&page_obj, b"Annots") else { continue };
+        let mut new_list = Vec::with_capacity(list.len());
+        for a in list {
+            let is_ref = matches!(a, lopdf::Object::Reference(_));
+            let mut obj = match &a {
+                lopdf::Object::Reference(id) => doc.get_object(*id)?.clone(),
+                other => other.clone(),
+            };
+            let is_hl = lget(&obj, b"Subtype") == Some(lopdf::Object::Name(b"Highlight".to_vec()));
+            if is_hl {
+                if let Some(lopdf::Object::Array(v)) = lget(&obj, b"Rect") {
+                    let nums: Vec<f32> = v.iter().filter_map(|o| o.as_float().ok()).collect();
+                    if nums.len() == 4 && same_rect(&nums, rect) {
+                        let (x0, y0, x1, y1) = (nums[0], nums[1], nums[2], nums[3]);
+                        let qp = lopdf::Object::Array(vec![
+                            lopdf::Object::Real(x0), lopdf::Object::Real(y0),
+                            lopdf::Object::Real(x1), lopdf::Object::Real(y0),
+                            lopdf::Object::Real(x1), lopdf::Object::Real(y1),
+                            lopdf::Object::Real(x0), lopdf::Object::Real(y1),
+                        ]);
+                        if let lopdf::Object::Dictionary(d) = &mut obj {
+                            d.set(b"QuadPoints", qp);
+                            d.set(b"CA", lopdf::Object::Real(0.4));
+                        }
+                        if is_ref {
+                            let id = match &a { lopdf::Object::Reference(i) => *i, _ => unreachable!() };
+                            *doc.get_object_mut(id)? = obj.clone();
+                        }
+                        patched += 1;
+                    }
+                }
+            }
+            new_list.push(if is_ref { a } else { obj });
+        }
+        if let lopdf::Object::Dictionary(d) = doc.get_object_mut(*page_id)? {
+            d.set(b"Annots", lopdf::Object::Array(new_list));
+        }
+    }
+    if patched > 0 {
+        // lopdf reescribe el fichero: se escribe a un temporal y se renombra
+        // (si no, pdfium lo tiene mapeado y se rompe)
+        let tmp = path.with_extension("patch.pdf");
+        doc.save(&tmp)?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&tmp, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+        std::fs::rename(&tmp, path)?;
+    }
+    Ok(patched)
+}
+
+/// `Object::get` de lopdf choca con el trait del prelude de pdfium: se accede
+/// al diccionario directamente.
+fn lget(o: &lopdf::Object, key: &[u8]) -> Option<lopdf::Object> {
+    match o {
+        lopdf::Object::Dictionary(d) => d.get(key).ok().cloned(),
+        _ => None,
+    }
+}
+
+/// ¿Los dos rects son el mismo (con margen)?
+fn same_rect(a: &[f32], b: &[f32; 4]) -> bool {
+    a.len() == 4
+        && (a[0] - b[0]).abs() < 0.5
+        && (a[1] - b[1]).abs() < 0.5
+        && (a[2] - b[2]).abs() < 0.5
+        && (a[3] - b[3]).abs() < 0.5
+}
+
 /// Solo PDFs: extensión + magia `%PDF-` (la extensión sola se falsifica
 /// renombrando; el filtro del diálogo no cubre argv ni historial).
 /// Puro y testeable.
@@ -1015,18 +1159,28 @@ fn finish_open(ui: &AppWindow, st: &Rc<RefCell<State>>, path: &PathBuf) {
     touch_history(&st.borrow());
     push_history(ui);
     // sin copia de trabajo: se pregunta si se quiere crear (las notas van allí)
+    let mode = st.borrow().settings.copy_mode;
     if st.borrow().working.is_none() {
-        let wp = working_path(path);
-        let name = wp.file_name().and_then(|n| n.to_str()).unwrap_or("documento_anotado.pdf");
-        st.borrow_mut().dlg_pending = Some(Pending::CreateCopy);
-        show_dlg(
-            ui,
-            0,
-            "Copia de trabajo",
-            &format!(
-                "¿Crear la copia \"{name}\"? Tus notas se guardarán ahí; el original no se toca."
-            ),
-        );
+        if mode == 1 {
+            // "crear siempre": se hace sin preguntar
+            if let Err(e) = make_working(ui, st) {
+                notify(ui, st, format!("No se pudo crear la copia: {e:#}"));
+            }
+            return;
+        }
+        if mode == 0 {
+            let wp = working_path(path);
+            let name = wp.file_name().and_then(|n| n.to_str()).unwrap_or("documento_anotado.pdf");
+            st.borrow_mut().dlg_pending = Some(Pending::CreateCopy);
+            show_dlg(
+                ui,
+                0,
+                "Copia de trabajo",
+                &format!(
+                    "¿Crear la copia \"{name}\"? Tus notas se guardarán ahí; el original no se toca."
+                ),
+            );
+        }
     }
 }
 
@@ -1073,10 +1227,21 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> Note
     let res = with_state(st, |s| annotate_open(s, &req));
     match res {
         Ok(added) => {
-            st.borrow_mut().doc_notes.extend(added);
+            {
+                // se apunta qué anotación corresponde a qué error (para "Borrar")
+                let mut s = st.borrow_mut();
+                let first = s.doc_notes.len();
+                s.doc_notes.extend(added);
+                if let AnnotateReq::Highlight(idxs, _) = req {
+                    for (k, gi) in idxs.iter().enumerate() {
+                        s.err_anno.insert(*gi, first + k);
+                    }
+                }
+            }
             let pg = st.borrow().page;
             show(ui, &mut st.borrow_mut(), pg); // la nota se ve al momento
             push_page_notes(ui, &st.borrow());
+            push_errs(ui, st); // la card muestra "Borrar"
             touch_history(&st.borrow());
             push_history(ui);
             notify(ui, st, "Nota guardada en la copia de trabajo".into());
@@ -1132,6 +1297,23 @@ fn is_password_error(e: &PdfiumError) -> bool {
     )
 }
 
+/// Convierte un rectángulo de la imagen (px, origen arriba-izq) a puntos PDF
+/// (origen abajo-izq). Puro y testeable.
+fn px_rect_to_pdf(
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    page_w: f32,
+    page_h: f32,
+    img_w: f32,
+    img_h: f32,
+) -> (f32, f32, f32, f32) {
+    let to_x = |v: f32| (v / img_w * page_w).clamp(0.0, page_w);
+    let to_y = |v: f32| (page_h - v / img_h * page_h).clamp(0.0, page_h);
+    (to_x(x0.min(x1)), to_y(y0.max(y1)), to_x(x0.max(x1)), to_y(y0.min(y1)))
+}
+
 /// Copia el documento a su fichero de trabajo "{nombre}_anotado.pdf"
 /// (0600, atómico). Nunca toca el original.
 fn copy_to_working(src: &std::path::Path) -> anyhow::Result<PathBuf> {
@@ -1161,6 +1343,7 @@ fn create_working_copy(st: &mut State) -> anyhow::Result<PathBuf> {
 /// trabajo. Devuelve las notas creadas (para el tooltip).
 /// - reabre el doc si la copia cambió por fuera (no pisar ediciones ajenas)
 /// - guarda vía temporal + rename (Pdfium tiene el fichero mapeado)
+/// - los resaltados se parchean después con lopdf (pdfium no pone QuadPoints)
 fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNote>> {
     let out = st.working.clone().context("sin copia de trabajo")?;
     let stale = st.doc_from.as_deref() != Some(out.as_path()) || st.doc_stamp != file_stamp(&out);
@@ -1168,42 +1351,121 @@ fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNot
         open_doc_file(st, &out).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     }
     let mut added: Vec<DocNote> = vec![];
+    let mut hl_rects: Vec<(u32, [f32; 4])> = vec![];
     {
+        let color_mode = st.settings.hl_color;
         let doc = st.doc.as_mut().context("sin documento abierto")?;
         let pages = doc.pages_mut();
         match req {
-            AnnotateReq::Error(idx, text) => {
-                let e = st.all_errs.get(*idx).cloned().context("hallazgo no válido")?;
-                let t = note_text(&e, text);
-                let mut pg = pages.get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                let mut ann = pg.annotations_mut().create_text_annotation(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                added.push(DocNote { page: e.page, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, text: t });
-            }
-            AnnotateReq::Many(idxs, text) => {
+            // resaltado + comentario sobre la palabra de uno o varios errores
+            AnnotateReq::Highlight(idxs, text) => {
                 anyhow::ensure!(!idxs.is_empty(), "grupo vacío");
                 for idx in idxs {
                     let e = st.all_errs.get(*idx).cloned().context("hallazgo no válido")?;
                     let t = note_text(&e, text);
                     let mut pg = pages.get(e.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                    let mut ann = pg.annotations_mut().create_text_annotation(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    let mut ann = pg.annotations_mut().create_highlight_annotation().map_err(|e| anyhow::anyhow!("{e:?}"))?;
                     ann.set_bounds(PdfRect::new_from_values(e.y0, e.x0, e.y1, e.x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                    added.push(DocNote { page: e.page, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, text: t });
+                    ann.set_stroke_color(hl_color(color_mode, &e.kind)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    ann.set_contents(&t).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    hl_rects.push((e.page, [e.x0, e.y0, e.x1, e.y1]));
+                    added.push(DocNote { page: e.page, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, text: t, kind: AnnoKind::Highlight });
                 }
             }
-            AnnotateReq::AtPoint(page, x, y, text) => {
+            // nota adhesiva libre (sticky note)
+            AnnotateReq::Note(page, x, y, text) => {
                 anyhow::ensure!(!text.trim().is_empty(), "escribe la nota primero");
                 let mut pg = pages.get(*page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let mut ann = pg.annotations_mut().create_text_annotation(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 ann.set_bounds(PdfRect::new_from_values((*y - 6.0).max(0.0), (*x - 6.0).max(0.0), *y + 6.0, *x + 6.0))
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                added.push(DocNote { page: *page, x0: *x, y0: *y, x1: *x, y1: *y, text: text.clone() });
+                added.push(DocNote { page: *page, x0: *x, y0: *y, x1: *x, y1: *y, text: text.clone(), kind: AnnoKind::Note });
+            }
+            // resaltado libre sobre un rectángulo
+            AnnotateReq::HighlightRect(page, x0, y0, x1, y1, text) => {
+                anyhow::ensure!(!text.trim().is_empty(), "escribe el comentario primero");
+                let mut pg = pages.get(*page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let mut ann = pg.annotations_mut().create_highlight_annotation().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                ann.set_bounds(PdfRect::new_from_values(*y0, *x0, *y1, *x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                ann.set_stroke_color(hl_color(color_mode, "")).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                ann.set_contents(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                hl_rects.push((*page, [*x0, *y0, *x1, *y1]));
+                added.push(DocNote { page: *page, x0: *x0, y0: *y0, x1: *x1, y1: *y1, text: text.clone(), kind: AnnoKind::Highlight });
             }
         }
     }
     let doc = st.doc.as_ref().context("sin documento abierto")?;
     save_doc(doc, &out)?;
+    // los resaltados necesitan /QuadPoints: los pone lopdf sobre el fichero
+    if !hl_rects.is_empty() {
+        if let Err(e) = patch_highlights(&out, &hl_rects) {
+            anyhow::bail!("no se pudo pintar el resaltado: {e:#}");
+        }
+        // el fichero cambió: se reabre para que el visor muestre el resaltado
+        open_doc_file(st, &out).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    }
     Ok(added)
+}
+
+/// Color del resaltado: por gravedad (rojo/morado) o amarillo único.
+fn hl_color(mode: u8, kind: &str) -> PdfColor {
+    if mode == 1 {
+        return PdfColor::new(255, 214, 0, 255);
+    }
+    match kind {
+        "Sintaxis" => PdfColor::new(106, 27, 154, 255),
+        _ => PdfColor::new(211, 47, 47, 255),
+    }
+}
+
+/// Borra una anotación del PDF (y la quita de la lista en memoria).
+fn delete_anno(st: &mut State, idx: usize) -> anyhow::Result<()> {
+    let out = st.working.clone().context("sin copia de trabajo")?;
+    let n = st.doc_notes.get(idx).cloned().context("anotación no válida")?;
+    let stale = st.doc_from.as_deref() != Some(out.as_path()) || st.doc_stamp != file_stamp(&out);
+    if stale {
+        open_doc_file(st, &out).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    }
+    let doc = st.doc.as_mut().context("sin documento abierto")?;
+    let mut pages = doc.pages_mut();
+    let mut pg = pages.get(n.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    // se busca la anotación que coincide (tipo + rect + texto) y se borra
+    let mut target = None;
+    {
+        let anns = pg.annotations();
+        for (i, a) in anns.iter().enumerate() {
+            let kind_ok = match (a.annotation_type(), n.kind) {
+                (PdfPageAnnotationType::Text, AnnoKind::Note) => true,
+                (PdfPageAnnotationType::Highlight, AnnoKind::Highlight) => true,
+                _ => false,
+            };
+            if !kind_ok {
+                continue;
+            }
+            let txt_ok = a.contents().as_deref() == Some(n.text.as_str());
+            let rect_ok = a.bounds().map(|b| {
+                (b.left().value - n.x0).abs() < 0.5
+                    && (b.bottom().value - n.y0).abs() < 0.5
+                    && (b.right().value - n.x1).abs() < 0.5
+                    && (b.top().value - n.y1).abs() < 0.5
+            }).unwrap_or(false);
+            if txt_ok && rect_ok {
+                target = Some(i);
+                break;
+            }
+        }
+    }
+    let i = target.context("no se encontró la anotación en el PDF")?;
+    let mut anns = pg.annotations_mut();
+    let a = anns.get(i)?;
+    anns.delete_annotation(a)?;
+    drop(anns);
+    drop(pg);
+    drop(pages);
+    let doc = st.doc.as_ref().context("sin documento abierto")?;
+    save_doc(doc, &out)?;
+    st.doc_notes.remove(idx);
+    Ok(())
 }
 
 fn show(ui: &AppWindow, st: &mut State, page: u32) {
@@ -1288,14 +1550,15 @@ fn push_page_notes(ui: &AppWindow, st: &State) {
     let pn: Vec<NoteRow> = st
         .doc_notes
         .iter()
-        .filter(|n| n.page == page)
-        .map(|n| {
+        .enumerate()
+        .filter(|(_, n)| n.page == page)
+        .map(|(i, n)| {
             let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
             let mut t: String = n.text.chars().take(200).collect();
             if n.text.chars().count() > 200 {
                 t.push('…');
             }
-            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y }
+            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y, idx: i as i32 }
         })
         .collect();
     ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
@@ -1359,6 +1622,9 @@ fn main() -> anyhow::Result<()> {
         doc_stamp: None,
         path: None,
         working: None,
+        settings: load_settings(),
+        err_anno: HashMap::new(),
+        free_rect: None,
         password: None,
         dlg_pending: None,
         page: 0,
@@ -1552,9 +1818,18 @@ fn main() -> anyhow::Result<()> {
         let st = st.clone();
         ui.on_free_note_new(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
-            st.borrow_mut().free_pt = None; // armado: el toque en el doc fija el punto
+            if ui.get_tool_mode() == 1 {
+                ui.set_tool_mode(0);
+                ui.set_free_note_on(false);
+                return;
+            }
+            let mut s = st.borrow_mut();
+            s.free_pt = None; // armado: el toque en el doc fija el punto
+            s.free_rect = None;
+            drop(s);
+            ui.set_tool_mode(1);
             ui.set_free_note_text("".into());
-            ui.set_free_note_on(true);
+            ui.set_free_note_on(false);
             notify(&ui, &st, "Toca el punto del documento para la nota".into());
         });
     }
@@ -1563,7 +1838,7 @@ fn main() -> anyhow::Result<()> {
         let st = st.clone();
         ui.on_page_clicked(move |mx, my| {
             let Some(ui) = ui_weak.upgrade() else { return };
-            if !ui.get_free_note_on() {
+            if ui.get_tool_mode() != 1 {
                 return;
             }
             let s = st.borrow();
@@ -1576,7 +1851,35 @@ fn main() -> anyhow::Result<()> {
             let pg = s.page;
             drop(s);
             st.borrow_mut().free_pt = Some((pg, x, y));
+            ui.set_free_note_on(true);
             notify(&ui, &st, "Punto marcado: escribe y pulsa Guardar".into());
+        });
+    }
+    {
+        // resaltado libre: rectángulo arrastrado sobre la página
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_page_rect(move |x0, y0, x1, y1| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if ui.get_tool_mode() != 2 {
+                return;
+            }
+            let s = st.borrow();
+            if s.img_w == 0 || s.img_h == 0 {
+                return;
+            }
+            let (pw, ph, iw, ih) = (s.page_w, s.page_h, s.img_w as f32, s.img_h as f32);
+            let pg = s.page;
+            drop(s);
+            // px de imagen → puntos PDF (y invertido)
+            let (ax, ay, bx, by) = px_rect_to_pdf(x0, y0, x1, y1, pw, ph, iw, ih);
+            if (bx - ax).abs() < 1.0 || (by - ay).abs() < 1.0 {
+                notify(&ui, &st, "Arrastra un rectángulo (no un clic)".into());
+                return;
+            }
+            st.borrow_mut().free_rect = Some((pg, ax, ay, bx, by));
+            ui.set_free_note_on(true);
+            notify(&ui, &st, "Zona marcada: escribe el comentario y guarda".into());
         });
     }
     {
@@ -1585,19 +1888,34 @@ fn main() -> anyhow::Result<()> {
         ui.on_free_note_save(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let text = ui.get_free_note_text().to_string();
+            let mode = ui.get_tool_mode();
             let pt = st.borrow().free_pt;
-            let res = match pt {
-                Some((pg, x, y)) => apply_note(&ui, &st, AnnotateReq::AtPoint(pg, x, y, text)),
-                None => {
-                    notify(&ui, &st, "Toca primero el punto del PDF".into());
-                    NoteResult::Failed
+            let rect = st.borrow().free_rect;
+            let res = if mode == 2 {
+                match rect {
+                    Some((pg, x0, y0, x1, y1)) => apply_note(&ui, &st, AnnotateReq::HighlightRect(pg, x0, y0, x1, y1, text)),
+                    None => {
+                        notify(&ui, &st, "Arrastra un rectángulo sobre el documento primero".into());
+                        NoteResult::Failed
+                    }
+                }
+            } else {
+                match pt {
+                    Some((pg, x, y)) => apply_note(&ui, &st, AnnotateReq::Note(pg, x, y, text)),
+                    None => {
+                        notify(&ui, &st, "Toca primero el punto del PDF".into());
+                        NoteResult::Failed
+                    }
                 }
             };
             // el panel solo se cierra si la nota quedó guardada: si no, el
             // texto se pierde y el usuario tiene que reescribirla
             if res == NoteResult::Saved {
                 ui.set_free_note_on(false);
-                st.borrow_mut().free_pt = None;
+                ui.set_tool_mode(0);
+                let mut s = st.borrow_mut();
+                s.free_pt = None;
+                s.free_rect = None;
             }
         });
     }
@@ -1607,8 +1925,183 @@ fn main() -> anyhow::Result<()> {
         ui.on_free_note_cancel(move || {
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_free_note_on(false);
+                ui.set_tool_mode(0);
             }
-            st.borrow_mut().free_pt = None;
+            let mut s = st.borrow_mut();
+            s.free_pt = None;
+            s.free_rect = None;
+        });
+    }
+    {
+        // modo resaltar (texto libre): se arrastra un rectángulo sobre la página
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_highlight_new(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if ui.get_tool_mode() == 2 {
+                ui.set_tool_mode(0);
+                ui.set_free_note_on(false);
+                return;
+            }
+            ui.set_tool_mode(2);
+            ui.set_free_note_on(false);
+            let mut s = st.borrow_mut();
+            s.free_pt = None;
+            s.free_rect = None;
+            notify(&ui, &st, "Arrastra sobre el texto que quieras resaltar".into());
+        });
+    }
+    {
+        // modo borrar: pinchar en un marcador lo borra
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_delete_mode(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if ui.get_tool_mode() == 3 {
+                ui.set_tool_mode(0);
+                return;
+            }
+            ui.set_tool_mode(3);
+            ui.set_free_note_on(false);
+            notify(&ui, &st, "Pincha en un marcador para borrarlo".into());
+        });
+    }
+    {
+        // borrar una anotación (desde el marcador o desde la card)
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_delete_note(move |idx| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let res = with_state(&st, |s| delete_anno(s, idx as usize));
+            match res {
+                Ok(()) => {
+                    let pg = st.borrow().page;
+                    show(&ui, &mut st.borrow_mut(), pg);
+                    push_page_notes(&ui, &st.borrow());
+                    st.borrow_mut().err_anno.clear();
+                    push_errs(&ui, &st);
+                    notify(&ui, &st, "Anotación borrada".into());
+                }
+                Err(e) => notify(&ui, &st, format!("No se pudo borrar: {e:#}")),
+            }
+        });
+    }
+    {
+        // borrar el resaltado de un error concreto (desde su card)
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_delete_anno(move |row| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let gi = match st.borrow().view.get(row as usize) {
+                Some(g) => *g,
+                None => return,
+            };
+            // si es un grupo, se borran los resaltados de todos sus miembros
+            let group = st.borrow().view_group.get(row as usize).cloned().flatten();
+            let targets: Vec<usize> = match group {
+                Some(w) => st
+                    .borrow()
+                    .all_errs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.word == w)
+                    .filter_map(|(k, _)| st.borrow().err_anno.get(&k).copied())
+                    .collect(),
+                None => st.borrow().err_anno.get(&gi).copied().into_iter().collect(),
+            };
+            if targets.is_empty() {
+                return;
+            }
+            // de mayor a menor: al borrar, los índices de la lista se mueven
+            let mut targets = targets;
+            targets.sort_unstable();
+            targets.reverse();
+            let mut errs = 0;
+            for t in targets {
+                match with_state(&st, |s| delete_anno(s, t)) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        errs += 1;
+                        notify(&ui, &st, format!("No se pudo borrar: {e:#}"));
+                    }
+                }
+            }
+            st.borrow_mut().err_anno.clear();
+            let pg = st.borrow().page;
+            show(&ui, &mut st.borrow_mut(), pg);
+            push_page_notes(&ui, &st.borrow());
+            push_errs(&ui, &st);
+            if errs == 0 {
+                notify(&ui, &st, "Anotación borrada".into());
+            }
+        });
+    }
+    {
+        // la ventana de ajustes se crea desde Rust (Slint no tiene show() en .slint)
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        let win: Rc<RefCell<Option<SettingsWindow>>> = Rc::new(RefCell::new(None));
+        let win2 = win.clone();
+        ui.on_open_settings(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let s = st.borrow().settings;
+            let mut slot = win2.borrow_mut();
+            if slot.is_none() {
+                match SettingsWindow::new() {
+                    Ok(w) => {
+                        w.set_hl_color(s.hl_color as i32);
+                        w.set_copy_mode(s.copy_mode as i32);
+                        w.set_motor_on(s.motor);
+                        let st2 = st.clone();
+                        let ui2 = ui_weak.clone();
+                        w.on_apply(move |hl, copy, motor| {
+                            let Some(ui) = ui2.upgrade() else { return };
+                            let s2 = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor };
+                            save_settings(&s2);
+                            {
+                                let mut stt = st2.borrow_mut();
+                                stt.settings = s2;
+                                stt.lt_dead = !s2.motor;
+                            }
+                            ui.set_set_hl_color(hl);
+                            ui.set_set_copy_mode(copy);
+                            ui.set_set_motor(motor);
+                            notify(&ui, &st2, "Ajustes guardados".into());
+                        });
+                        *slot = Some(w);
+                    }
+                    Err(e) => {
+                        notify(&ui, &st, format!("No se pudo abrir Ajustes: {e:?}"));
+                        return;
+                    }
+                }
+            } else if let Some(w) = slot.as_ref() {
+                // se recargan los valores por si cambiaron en otra parte
+                w.set_hl_color(s.hl_color as i32);
+                w.set_copy_mode(s.copy_mode as i32);
+                w.set_motor_on(s.motor);
+            }
+            if let Some(w) = slot.as_ref() {
+                let _ = w.window().show();
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_settings_apply(move |hl, copy, motor| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let s = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor };
+            save_settings(&s);
+            {
+                let mut stt = st.borrow_mut();
+                stt.settings = s;
+                stt.lt_dead = !s.motor;
+            }
+            ui.set_set_hl_color(hl);
+            ui.set_set_copy_mode(copy);
+            ui.set_set_motor(motor);
+            notify(&ui, &st, "Ajustes guardados".into());
         });
     }
 
@@ -1750,13 +2243,13 @@ fn main() -> anyhow::Result<()> {
             let req = if let Some(w) = group {
                 let idxs: Vec<usize> = st.borrow().all_errs.iter().enumerate()
                     .filter(|(_, e)| e.word == w).map(|(gi, _)| gi).collect();
-                AnnotateReq::Many(idxs, text)
+                AnnotateReq::Highlight(idxs, text)
             } else {
                 let gi = match st.borrow().view.get(i as usize) {
                     Some(g) => *g,
                     None => return,
                 };
-                AnnotateReq::Error(gi, text)
+                AnnotateReq::Highlight(vec![gi], text)
             };
             let res = apply_note(&ui, &st, req);
             // el editor se cierra solo si la nota se guardó (si no, se pierde)
@@ -1792,13 +2285,13 @@ fn main() -> anyhow::Result<()> {
             let res = if let Some(w) = group {
                 let idxs: Vec<usize> = st.borrow().all_errs.iter().enumerate()
                     .filter(|(_, e)| e.word == w).map(|(gi, _)| gi).collect();
-                AnnotateReq::Many(idxs, text)
+                AnnotateReq::Highlight(idxs, text)
             } else {
                 let gi = match st.borrow().view.get(i as usize) {
                     Some(g) => *g,
                     None => return,
                 };
-                AnnotateReq::Error(gi, text)
+                AnnotateReq::Highlight(vec![gi], text)
             };
             apply_note(&ui, &st, res);
         });
@@ -1855,7 +2348,16 @@ fn main() -> anyhow::Result<()> {
                         notify(&ui, &st, format!("No se pudo crear la copia: {e:#}"));
                         return;
                     }
-                    apply_note(&ui, &st, req);
+                    let res = apply_note(&ui, &st, req);
+                    if res == NoteResult::Saved {
+                        // la nota se guardó al final: se cierra lo que estaba abierto
+                        ui.set_selected_note(-1);
+                        ui.set_free_note_on(false);
+                        ui.set_tool_mode(0);
+                        let mut s = st.borrow_mut();
+                        s.free_pt = None;
+                        s.free_rect = None;
+                    }
                 }
                 None => {}
             }
@@ -1950,6 +2452,12 @@ fn main() -> anyhow::Result<()> {
     // ponytail: el Child viaja por el canal al hilo UI; los hilos de página solo hacen HTTP
     {
         let tx = st.borrow().tx.clone();
+        // con el motor desactivado (ajustes) no se arranca nada: el texto no
+        // sale del proceso y no hay revisión
+        if !st.borrow().settings.motor {
+            st.borrow_mut().lt_dead = true;
+            ui.set_lt_status("Motor desactivado (no se envía texto a ningún proceso).".into());
+        } else {
         std::thread::spawn(move || {
             let Some(dir) = lt_dir() else {
                 let _ = tx.send(SpellEvent::LtFail("no se encontró assets/lt (¿falló la descarga en build?)".into()));
@@ -2012,6 +2520,7 @@ fn main() -> anyhow::Result<()> {
             } // fin de los intentos
             let _ = tx.send(SpellEvent::LtFail("el servidor LT no respondió a tiempo".into()));
         });
+        }
     }
 
     // ponytail: abrir por argv evita el diálogo para pruebas/demos; quitar si molesta
@@ -2188,6 +2697,7 @@ mod tests {
             pdfium: load_pdfium(),
             doc: None, doc_from: None, doc_stamp: None,
             path: Some(path), working: None, password: None, dlg_pending: None,
+            settings: Settings::default(), err_anno: HashMap::new(), free_rect: None,
             page: 0, total: 3,
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
@@ -2197,9 +2707,10 @@ mod tests {
         }
     }
 
-    /// Un solo test toca Pdfium (instanciarlo dos veces se cuelga).
+    /// Un solo test toca Pdfium (instanciarlo dos veces se cuelga): aquí van
+    /// encadenados crear, comprobar el parcheo y borrar.
     #[test]
-    fn anotacion_en_copia_de_trabajo() {
+    fn anotaciones_en_copia_de_trabajo() {
         let src = fixture_pdf();
         let mut st = state_for(src.clone(), 1.0);
         // la copia de trabajo se crea y es privada
@@ -2215,11 +2726,50 @@ mod tests {
         // se anota sobre el documento abierto y se guarda al momento
         st.working = Some(out.clone());
         open_doc_file(&mut st, &out).unwrap();
-        let added = annotate_open(&mut st, &AnnotateReq::Error(0, "nota redonda".into())).unwrap();
+        let added = annotate_open(&mut st, &AnnotateReq::Highlight(vec![0], "nota redonda".into())).unwrap();
         assert_eq!(added.len(), 1);
+        assert_eq!(added[0].kind, AnnoKind::Highlight);
         // la nota se lee del fichero guardado (roundtrip)
         let notes = read_notes(st.pdfium, &out);
         assert!(notes.iter().any(|n| n.text.contains("nota redonda") && n.page == 0));
+        // el resaltado lleva /QuadPoints (si no, no se ve en ningún lector)
+        {
+            let doc = lopdf::Document::load(&out).unwrap();
+            let pages = doc.get_pages();
+            let page = doc.get_object(*pages.get(&1u32).unwrap()).unwrap();
+            let anns = match lget(&page, b"Annots") {
+                Some(lopdf::Object::Array(v)) => v,
+                _ => panic!("sin anotaciones"),
+            };
+            let mut found = false;
+            for a in anns {
+                let obj = match &a {
+                    lopdf::Object::Reference(id) => doc.get_object(*id).unwrap().clone(),
+                    other => other.clone(),
+                };
+                if lget(&obj, b"Subtype") == Some(lopdf::Object::Name(b"Highlight".to_vec())) {
+                    assert!(lget(&obj, b"QuadPoints").is_some(), "falta /QuadPoints");
+                    assert!(lget(&obj, b"CA").is_some(), "falta /CA (transparencia)");
+                    found = true;
+                }
+            }
+            assert!(found, "no hay resaltados en el PDF");
+        }
+        // y se puede borrar (desaparece del PDF)
+        st.doc_notes.extend(added);
+        delete_anno(&mut st, 0).unwrap();
+        assert!(st.doc_notes.is_empty());
+        {
+            let doc = lopdf::Document::load(&out).unwrap();
+            let pages = doc.get_pages();
+            let page = doc.get_object(*pages.get(&1u32).unwrap()).unwrap();
+            let n = match lget(&page, b"Annots") {
+                Some(lopdf::Object::Array(v)) => v.len(),
+                _ => 0,
+            };
+            assert_eq!(n, 0, "quedan anotaciones en el PDF");
+        }
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]
@@ -2237,6 +2787,20 @@ mod tests {
     }
 
     #[test]
+    fn el_rectangulo_de_la_pantalla_pasa_a_puntos_pdf() {
+        // pág 612x792 pt, imagen 1224x1584 px (escala 2)
+        let (x0, y0, x1, y1) = px_rect_to_pdf(100.0, 200.0, 300.0, 400.0, 612.0, 792.0, 1224.0, 1584.0);
+        assert!((x0 - 50.0).abs() < 0.01 && (x1 - 150.0).abs() < 0.01);
+        // la y se invierte: arriba de la imagen = abajo del PDF
+        assert!((y0 - 592.0).abs() < 0.01, "y0={y0}");
+        assert!((y1 - 692.0).abs() < 0.01, "y1={y1}");
+        // arrastrar al revés da el mismo rectángulo
+        let (a, b, c, d) = px_rect_to_pdf(300.0, 400.0, 100.0, 200.0, 612.0, 792.0, 1224.0, 1584.0);
+        assert!((a - x0).abs() < 0.01 && (b - y0).abs() < 0.01);
+        assert!((c - x1).abs() < 0.01 && (d - y1).abs() < 0.01);
+    }
+
+    #[test]
     fn working_path_never_doubles_the_suffix() {
         assert_eq!(working_path(std::path::Path::new("/tmp/doc.pdf")), PathBuf::from("/tmp/doc_anotado.pdf"));
         // ya es copia de trabajo: se usa tal cual (nada de _anotado_anotado)
@@ -2244,9 +2808,13 @@ mod tests {
         assert_eq!(working_path(std::path::Path::new("/tmp/doc_anotado_anotado.pdf")), PathBuf::from("/tmp/doc_anotado_anotado.pdf"));
     }
 
+    /// El resaltado debe quedar en el PDF con /QuadPoints (si no, no se ve en
+    /// ningún lector) y con el texto del documento intacto.
+
+    /// Borrar una anotación la quita del PDF (y de la lista en memoria).
+
     #[test]
-    fn working_copy_is_private() {
-        // nombre propio: los tests corren en paralelo y comparten /tmp
+    fn working_copy_is_private() {        // nombre propio: los tests corren en paralelo y comparten /tmp
         let src = std::path::PathBuf::from("/tmp/doc3_priv.pdf");
         std::fs::copy(fixture_pdf(), &src).unwrap();
         let out = copy_to_working(&src).unwrap();

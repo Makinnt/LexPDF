@@ -5,6 +5,9 @@ component IconArrowFwd inherits Path { commands: "M12 4l-1.41 1.41L16.17 11H4v2h
 component IconNoteAdd inherits Path { commands: "M13 11h-2v3H8v2h3v3h2v-3h3v-2h-3zm1-9H6c-1.1 0-2 .9-2 2v16c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"; }
 component IconZoomIn inherits Path { commands: "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm.5-7H9v2H7v1h2v2h1v-2h2V9h-2z"; }
 component IconZoomOut inherits Path { commands: "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z"; }
+component IconHighlight inherits Path { commands: "M19.71,6.04c0.39-0.39,0.39-1.02,0-1.41l-2.34-2.34C17.17,2.09,16.92,2,16.66,2c-0.25,0-0.51,0.1-0.7,0.29l-1.83,1.83 l3.75,3.75L19.71,6.04z"; }
+component IconDelete inherits Path { commands: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"; }
+component IconSettings inherits Path { commands: "M19.43 12.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.09-.16-.26-.25-.44-.25-.06 0-.12.01-.17.03l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.06-.02-.12-.03-.18-.03-.17 0-.34.09-.43.25l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.09.16.26.25.44.25.06 0 .12-.01.17-.03l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.06.02.12.03.18.03.17 0 .34-.09.43-.25l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zm-1.98-1.71c.04.31.05.52.05.73 0 .21-.02.43-.05.73l-.14 1.13.89.7 1.08.84-.7 1.21-1.27-.51-1.04-.42-.9.68c-.43.32-.84.56-1.25.73l-1.06.43-.16 1.13-.2 1.35h-1.4l-.19-1.35-.16-1.13-1.06-.43c-.43-.18-.83-.41-1.23-.71l-.91-.7-1.06.43-1.27.51-.7-1.21 1.08-.84.89-.7-.14-1.13c-.03-.31-.05-.54-.05-.74s.02-.43.05-.73l.14-1.13-.89-.7-1.08-.84.7-1.21 1.27.51 1.04.42.9-.68c.43-.32.84-.56 1.25-.73l1.06-.43.16-1.13.2-1.35h1.39l.19 1.35.16 1.13 1.06.43c.43.18.83.41 1.23.71l.91.7 1.06-.43 1.27-.51.7 1.21-1.07.85-.89.7.14 1.13zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"; }
 
 struct ErrRow {
     word: string,
@@ -17,6 +20,7 @@ struct ErrRow {
     desc: string,
     count: int,
     is_group: bool,
+    has_anno: bool,   // ya tiene resaltado+comentario (se puede borrar)
 }
 
 struct NoteRow {
@@ -24,6 +28,7 @@ struct NoteRow {
     page: int,
     x: float,   // px en la imagen de la página (origen arriba-izq)
     y: float,
+    idx: int,   // índice en la lista (para borrar)
 }
 
 struct HisRow {
@@ -96,6 +101,175 @@ component DropSel inherits Rectangle {
     }
 }
 
+// Ventana de Ajustes (aparte). El estado vive en el root; aquí se edita y se
+// aplica con el botón Guardar.
+export component SettingsWindow inherits Window {
+    title: "Ajustes · LexPDF";
+    width: 520px;
+    height: 680px;
+    background: #1e1e1e;
+
+    in-out property <int> hl-color: 0;    // 0 = por gravedad, 1 = amarillo
+    in-out property <int> copy-mode: 0;   // 0 = preguntar, 1 = siempre, 2 = nunca
+    in-out property <bool> motor-on: true;
+    callback apply(int, int, bool);
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
+
+        Text { text: "Ajustes"; font-size: 18px; font-weight: 700; color: #e8e8e8; }
+
+        // --- color del resaltado
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Color del resaltado"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Text {
+                text: "Por gravedad: rojo = ortografía, morado = sintaxis. Amarillo: uno solo para todo.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.hl-color == 0 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Por gravedad"; font-size: 13px;
+                        color: root.hl-color == 0 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.hl-color = 0; } }
+                }
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.hl-color == 1 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Amarillo único"; font-size: 13px;
+                        color: root.hl-color == 1 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.hl-color = 1; } }
+                }
+            }
+        }
+
+        // --- copia de trabajo
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Copia de trabajo para las notas"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Text {
+                text: "Las notas y los resaltados se guardan en {nombre}_anotado.pdf. El original nunca se toca.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.copy-mode == 0 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Preguntar"; font-size: 13px;
+                        color: root.copy-mode == 0 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.copy-mode = 0; } }
+                }
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.copy-mode == 1 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Crear siempre"; font-size: 13px;
+                        color: root.copy-mode == 1 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.copy-mode = 1; } }
+                }
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.copy-mode == 2 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Nunca"; font-size: 13px;
+                        color: root.copy-mode == 2 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.copy-mode = 2; } }
+                }
+            }
+        }
+
+        // --- motor
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Motor de revisión"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Text {
+                text: "El texto de cada página se revisa con LanguageTool en este PC (nunca sale a Internet). Si lo desactivas, no se envía texto a ningún proceso y no hay corrección.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Rectangle {
+                height: 30px; border-radius: 4px;
+                background: root.motor-on ? #e8e8e8 : #333;
+                border-width: 1px; border-color: #555;
+                Text {
+                    text: root.motor-on ? "Motor activado (revisión local)" : "Motor desactivado (no se envía texto)";
+                    font-size: 13px; color: root.motor-on ? #111 : #e8e8e8;
+                    width: parent.width; height: parent.height;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                TouchArea { width: parent.width; height: parent.height; clicked => { root.motor-on = !root.motor-on; } }
+            }
+        }
+
+        // --- licencias
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Licencias"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Rectangle {
+                background: #2d2d2d; border-radius: 4px; border-width: 1px; border-color: #444;
+                VerticalLayout {
+                    padding: 10px; spacing: 4px;
+                    Text {
+                        text: "LexPDF · GPL-3.0-only (lo exige Slint, enlazado)\nSlint · GPL-3.0-only / Royalty-free\nPDFium (pdfium-render) · MIT/Apache-2.0\nPDFium · BSD-3-Clause (assets/pdfium/licenses/)\nLanguageTool (sidecar) · LGPL-2.1\nIconos Material Icons Outlined · Apache-2.0 (assets/icons/)";
+                        font-size: 11px; color: #ccc; wrap: word-wrap;
+                    }
+                }
+            }
+            Text {
+                text: "Todo el texto de la app y de las notas sale de tu equipo: no hay telemetría ni servidores.";
+                font-size: 11px; color: #888; wrap: word-wrap;
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Rectangle {
+                height: 30px; border-radius: 4px;
+                background: #e8e8e8;
+                Text {
+                    text: "Guardar"; font-size: 13px; color: #111;
+                    width: parent.width; height: parent.height;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on); }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "LexPDF";
     min-width: 900px;
@@ -115,6 +289,15 @@ export component AppWindow inherits Window {
     in-out property <[NoteRow]> page-notes;
     in-out property <int> note-total: 0;
     in-out property <bool> has-working: true;
+    // herramienta activa: 0 = normal · 1 = nota (sticky) · 2 = resaltar · 3 = borrar
+    in-out property <int> tool-mode: 0;
+    in-out property <string> tool-hint: "";
+    // goma elástica del resaltado libre (px de la imagen de la página)
+    in-out property <float> drag-x0: 0;
+    in-out property <float> drag-y0: 0;
+    in-out property <float> drag-x1: 0;
+    in-out property <float> drag-y1: 0;
+    in-out property <bool> drag-on: false;
     // tamaño real de la ventana (lo pone Rust): el velo del diálogo no puede
     // depender de parent.width o Slint ve un bucle de layout en el root
     in-out property <length> win-w: 0px;
@@ -172,6 +355,17 @@ export component AppWindow inherits Window {
     callback theme-toggle();
     callback dlg-answer(bool);
     callback make-working();
+    callback page-rect(float, float, float, float);
+    callback delete-anno(int);
+    callback open-settings();
+    callback highlight-new();
+    callback delete-mode();
+    callback delete-note(int);
+    callback settings-apply(int, int, bool);
+    // valores guardados (el panel de ajustes los carga al abrirse)
+    in-out property <int> set-hl-color: 0;
+    in-out property <int> set-copy-mode: 0;
+    in-out property <bool> set-motor: true;
 
     // paleta según tema (fija, no depende del tema del SO)
     property <color> c-bg: root.is-dark ? #1e1e1e : white;
@@ -387,6 +581,12 @@ export component AppWindow inherits Window {
                                             bg: root.c-pill; fg: root.c-fg;
                                             clicked => { root.grammar-clicked(i); }
                                         }
+                                        MiniBtn {
+                                            label: "Borrar";
+                                            bg: root.c-pill; fg: root.c-fg;
+                                            visible: e.has_anno;
+                                            clicked => { root.delete-anno(i); }
+                                        }
                                     }
                                     HorizontalLayout {
                                         spacing: 4px;
@@ -414,7 +614,7 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                         MiniBtn {
-                                            label: "Guardar en PDF";
+                                            label: "Guardar";
                                             bg: root.c-accent; fg: root.c-accent-fg;
                                             clicked => { root.save-note(i); }
                                         }
@@ -487,6 +687,44 @@ export component AppWindow inherits Window {
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { free-note-new(); } }
                     }
+                    // resaltar texto libre (arrastrando un rectángulo)
+                    Rectangle {
+                        width: 30px; height: 28px;
+                        background: root.tool-mode == 2 ? root.c-accent : root.c-pill;
+                        border-radius: 4px;
+                        IconHighlight {
+                            width: 18px; height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: root.tool-mode == 2 ? root.c-accent-fg : root.c-fg;
+                        }
+                        TouchArea { width: parent.width; height: parent.height; clicked => { highlight-new(); } }
+                    }
+                    // borrar anotaciones (pinchar en el marcador)
+                    Rectangle {
+                        width: 30px; height: 28px;
+                        background: root.tool-mode == 3 ? root.c-accent : root.c-pill;
+                        border-radius: 4px;
+                        IconDelete {
+                            width: 18px; height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: root.tool-mode == 3 ? root.c-accent-fg : root.c-fg;
+                        }
+                        TouchArea { width: parent.width; height: parent.height; clicked => { delete-mode(); } }
+                    }
+                    // ajustes
+                    Rectangle {
+                        width: 30px; height: 28px;
+                        background: root.c-pill; border-radius: 4px;
+                        IconSettings {
+                            width: 18px; height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: root.c-fg;
+                        }
+                        TouchArea { width: parent.width; height: parent.height; clicked => { root.open-settings(); } }
+                    }
                     TouchArea {
                         width: 122px; height: 28px;
                         scroll-event(e) => {
@@ -549,17 +787,51 @@ export component AppWindow inherits Window {
                             source <=> root.page-image;
                             width: 100%; height: 100%;
                         }
-                        // notas nativas: zona sensible sobre el marcador ámbar -> tooltip al pasar el ratón.
+                        // notas nativas: zona sensible sobre el marcador -> tooltip al pasar el ratón.
                         // va ANTES del pg-touch: en modo nota el TouchArea de arriba se come el hover.
                         for n in root.page-notes: Rectangle {
                             x: n.x * 1px - 8px; y: n.y * 1px - 8px;
                             width: 24px; height: 24px;
                             Tooltip { text: n.text; }
+                            TouchArea {
+                                width: parent.width; height: parent.height;
+                                clicked => { if (root.tool-mode == 3) { root.delete-note(n.idx); } }
+                            }
                         }
-                        // solo en modo nota: el toque marca el punto, no interfiere si no
-                        if (root.free-note-on): pg-touch := TouchArea {
+                        // goma elástica del resaltado libre (modo 2)
+                        Rectangle {
+                            x: min(root.drag-x0, root.drag-x1) * 1px;
+                            y: min(root.drag-y0, root.drag-y1) * 1px;
+                            width: abs(root.drag-x1 - root.drag-x0) * 1px;
+                            height: abs(root.drag-y1 - root.drag-y0) * 1px;
+                            visible: root.drag-on;
+                            background: #ffd54f88;
+                            border-width: 1px; border-color: #ffb300;
+                        }
+                        // puntero/arrastre sobre la página (modos nota y resaltar)
+                        if (root.tool-mode == 1 || root.tool-mode == 2): pg-touch := TouchArea {
                             width: 100%; height: 100%;
-                            clicked => { root.page-clicked(pg-touch.mouse-x / 1px, pg-touch.mouse-y / 1px); }
+                            changed pressed => {
+                                if (self.pressed) {
+                                    root.drag-x0 = self.pressed-x / 1px;
+                                    root.drag-y0 = self.pressed-y / 1px;
+                                    root.drag-x1 = root.drag-x0;
+                                    root.drag-y1 = root.drag-y0;
+                                    root.drag-on = true;
+                                }
+                            }
+                            moved => {
+                                root.drag-x1 = self.mouse-x / 1px;
+                                root.drag-y1 = self.mouse-y / 1px;
+                            }
+                            clicked => {
+                                root.drag-on = false;
+                                if (root.tool-mode == 2) {
+                                    root.page-rect(root.drag-x0, root.drag-y0, self.mouse-x / 1px, self.mouse-y / 1px);
+                                } else {
+                                    root.page-clicked(self.mouse-x / 1px, self.mouse-y / 1px);
+                                }
+                            }
                         }
                     }
                 }
@@ -567,7 +839,10 @@ export component AppWindow inherits Window {
                 if (root.free-note-on): VerticalLayout {
                     spacing: 3px;
                     visible: root.has-doc;
-                    Text { text: "Toca el punto del documento, escribe y guarda."; font-size: 12px; color: root.c-dim; wrap: word-wrap; }
+                    Text {
+                        text: root.tool-mode == 2 ? "Escribe el comentario del resaltado y guarda." : "Toca el punto del documento, escribe y guarda.";
+                        font-size: 12px; color: root.c-dim; wrap: word-wrap;
+                    }
                     Rectangle {
                         height: 30px;
                         background: root.c-card; border-radius: 4px;
@@ -583,7 +858,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         MiniBtn {
-                            label: "Guardar nota";
+                            label: root.tool-mode == 2 ? "Guardar resaltado" : "Guardar nota";
                             bg: root.c-accent; fg: root.c-accent-fg;
                             clicked => { root.free-note-save(); }
                         }
