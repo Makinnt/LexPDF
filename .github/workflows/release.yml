@@ -77,6 +77,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
+          body: |
             ## Novedades de la v0.2.0
 
             - **Resaltados y comentarios de verdad**: se puede resaltar una palabra o un texto arrastrando encima y escribirle un comentario. El resaltado se guarda como anotación Highlight real del PDF (con /QuadPoints, se ve en cualquier lector) y el comentario, dentro.
@@ -181,6 +182,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
+          body: |
             ## Novedades de la v0.2.0
 
             - **Resaltados y comentarios de verdad**: se puede resaltar una palabra o un texto arrastrando encima y escribirle un comentario. El resaltado se guarda como anotación Highlight real del PDF (con /QuadPoints, se ve en cualquier lector) y el comentario, dentro.
