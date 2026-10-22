@@ -6,17 +6,6 @@ por LanguageTool en tu propio PC, te subraya los errores ortográficos y gramati
 
 Sin cuentas, sin nube, sin telemetría. El PDF no sale del ordenador.
 
-```
-┌─ sidebar ─────────┐┌─ visor ────────────────────────────┐
-│ LexPDF      Oscuro││  ←  Pág 12 de 62  →  📄 Nota  🔍- 50% 🔍+│
-│ ▓▓▓▓░░░░░░░░░░░░░░││                                       │
-│ Carso   Ortografía││      E l   v i e j o   y   e l   m a r│
-│ "Posible falta..."││                                       │
-│ → Cargo, Caso, Casó││   ─────────────────────────────    │
-│ [Omitir][Comentar]││      (los errores van subrayados     │
-│ [Obs. gramatical] ││       justo en la página)            │
-└───────────────────┘└───────────────────────────────────────┘
-```
 
 ## Esto está vibe-coded
 
