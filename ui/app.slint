@@ -169,7 +169,7 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
             Text { text: "Resaltar texto libre"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Text {
-                text: "Área: se resalta el rectángulo tal cual. Palabras: se resaltan las palabras que toque el rectángulo, como al seleccionar texto en un PDF.";
+                text: "Área: se resalta el rectángulo tal cual. Texto: se resaltan las palabras que toque el rectángulo, en una sola banda continua, como al seleccionar texto en un PDF.";
                 font-size: 12px; color: #aaa; wrap: word-wrap;
             }
             HorizontalLayout {
@@ -191,7 +191,7 @@ export component SettingsWindow inherits Window {
                     background: root.free-sel == 1 ? #e8e8e8 : #333;
                     border-width: 1px; border-color: #555;
                     Text {
-                        text: "Por palabras"; font-size: 13px;
+                        text: "Por texto"; font-size: 13px;
                         color: root.free-sel == 1 ? #111 : #e8e8e8;
                         width: parent.width; height: parent.height;
                         horizontal-alignment: center; vertical-alignment: center;
@@ -572,6 +572,7 @@ export component AppWindow inherits Window {
     callback highlight-new();
     callback delete-mode();
     callback delete-note(int);
+    callback note-cancel(int);
     // valores guardados (el panel de ajustes los carga al abrirse)
     in-out property <int> set-hl-color: 0;
     in-out property <int> set-copy-mode: 0;
@@ -809,27 +810,47 @@ export component AppWindow inherits Window {
                                             clicked => { root.group-toggle(i); }
                                         }
                                     }
-                                    VerticalLayout {
+                                    // Editor del comentario. Es un bloque `if` (no
+                                    // `visible`): así los elementos se crean al
+                                    // abrirlo y el campo coge el foco (se puede
+                                    // escribir sin tener que tocarlo).
+                                    if (root.selected-note == i): VerticalLayout {
                                         spacing: 3px;
-                                        visible: root.selected-note == i;
                                         Rectangle {
                                             height: 30px;
                                             background: root.c-input; border-radius: 4px;
                                             border-width: 1px; border-color: root.c-input-line;
+                                            // placeholder (Slint 1.18 no lo tiene)
+                                            Text {
+                                                x: 8px; width: parent.width - 16px; height: parent.height;
+                                                text: "Escriba aquí el comentario...";
+                                                font-size: 13px; color: root.c-dim;
+                                                vertical-alignment: center;
+                                                visible: root.note-text == "";
+                                            }
                                             TextInput {
                                                 x: 8px; width: parent.width - 16px; height: parent.height;
                                                 text <=> root.note-text;
                                                 font-size: 13px; color: root.c-fg;
                                                 vertical-alignment: center;
+                                                init => { self.focus(); }
                                                 accepted => {
                                                     if (root.note-text != "") { root.save-note(root.selected-note); }
                                                 }
                                             }
                                         }
-                                        MiniBtn {
-                                            label: "Guardar";
-                                            bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
-                                            clicked => { root.save-note(i); }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            MiniBtn {
+                                                label: "Guardar";
+                                                bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
+                                                clicked => { root.save-note(i); }
+                                            }
+                                            MiniBtn {
+                                                label: "Cancelar";
+                                                bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
+                                                clicked => { root.note-cancel(i); }
+                                            }
                                         }
                                     }
                                 }
@@ -1066,11 +1087,20 @@ export component AppWindow inherits Window {
                         height: 30px;
                         background: root.c-input; border-radius: 4px;
                         border-width: 1px; border-color: root.c-input-line;
+                        // placeholder (Slint 1.18 no lo tiene)
+                        Text {
+                            x: 8px; width: parent.width - 16px; height: parent.height;
+                            text: root.tool-mode == 2 ? "Escriba aquí el comentario..." : "Escriba aquí la nota...";
+                            font-size: 13px; color: root.c-dim;
+                            vertical-alignment: center;
+                            visible: root.free-note-text == "";
+                        }
                         TextInput {
                             x: 8px; width: parent.width - 16px; height: parent.height;
                             text <=> root.free-note-text;
                             font-size: 13px; color: root.c-fg;
                             vertical-alignment: center;
+                            init => { self.focus(); }
                             accepted => { if (root.free-note-text != "") { root.free-note-save(); } }
                         }
                     }

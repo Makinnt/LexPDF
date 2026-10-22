@@ -108,8 +108,8 @@ Flujos:
   desde la card del error (botón "Borrar", solo si tiene anotación).
   **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
   de la página, si no el scroll se come el arrastre del rectángulo.
-  El resaltado libre puede ser **por área** (el rectángulo) o **por palabras**
-  (`words_in_rect()`): cada palabra tocada es una anotación Highlight propia.
+  El resaltado libre puede ser **por área** (el rectángulo) o **por texto**
+  (`words_in_lines()`): una anotación Highlight por línea, continua.
 - **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
   `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
   (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".
@@ -122,6 +122,15 @@ Flujos:
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.
+- **GOTCHA `err_anno`**: el mapa error -> anotación guarda la **clave**
+  (página + rect), NO el índice en `doc_notes`: al borrar una nota los índices
+  se desplazan y el "Borrar" de la card acababa borrando la anotación
+  equivocada (el comentario se iba y el resaltado se quedaba).
+- **GOTCHA foco automático**: el editor de la card va en un bloque `if` (no
+  `visible:`), así los elementos se crean al abrirlo y el `TextInput` puede
+  hacer `init => { self.focus(); }` (se escribe sin tocar la caja). El
+  placeholder se pinta con un `Text` detrás (Slint 1.18 no tiene
+  `placeholder-text`).
 - **GOTCHA `Tooltip`**: el `Tooltip` tiene que ir **dentro** del `TouchArea`
   (si cuelga del `Rectangle` padre, el hover lo tiene el hijo y el tooltip no
   sale nunca). El tooltip es una ventana emergente aparte: para verlo hay que

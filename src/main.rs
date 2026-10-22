@@ -36,7 +36,10 @@ struct State {
     path: Option<PathBuf>,               // el documento que abrió el usuario (historial)
     working: Option<PathBuf>,            // copia de trabajo "{nombre}_anotado.pdf"
     settings: Settings,                  // ajustes del usuario (ventana aparte)
-    err_anno: HashMap<usize, usize>,     // idx de all_errs -> idx de doc_notes (para borrar)
+    // idx de all_errs -> (página, rect) de la anotación. OJO: no se guarda el
+    // índice de doc_notes porque al borrar una nota los demás se desplazan y
+    // el "Borrar" de la card acababa borrando la anotación equivocada.
+    err_anno: HashMap<usize, (u32, [f32; 4])>,
     free_rects: Option<(u32, Vec<[f32; 4]>)>, // resaltado libre pendiente: pág + rects
     password: Option<&'static str>,      // solo en memoria, nunca en disco
     dlg_pending: Option<Pending>,        // acción pendiente de un diálogo
@@ -1150,22 +1153,25 @@ fn open_licenses(lic: &Rc<RefCell<Option<LicensesWindow>>>) {
     }
 }
 
-/// Parchea los resaltados recién creados: pdfium no puede poner los
-/// `/QuadPoints` (sin ellos no se dibuja el resaltado en ningún lector) ni la
+/// Parchea los resaltados que se han quedado sin `/QuadPoints`: pdfium no puede
+/// ponerlos (sin ellos no se dibuja el resaltado en ningún lector) ni la
 /// transparencia. lopdf mete ambas cosas en el fichero ya guardado.
+///
+/// Repasa **todas** las anotaciones Highlight del documento (no solo las
+/// nuevas): si al guardar con pdfium se pierden los quad points de los
+/// resaltados que ya estaban, aquí se recuperan (si no, se ve el comentario
+/// pero el resaltado disappears o al revés).
 /// Gotchas: lopdf numera las páginas desde 1 y pdfium guarda las anotaciones
 /// *inline* en el array /Annots (hay que reescribir el array).
-fn patch_highlights(path: &std::path::Path, rects: &[(u32, [f32; 4])]) -> anyhow::Result<usize> {
-    if rects.is_empty() {
-        return Ok(0);
-    }
+fn patch_highlights(path: &std::path::Path) -> anyhow::Result<usize> {
     let mut doc = lopdf::Document::load(path)?;
     let pages = doc.get_pages();
     let mut patched = 0;
-    for (page_no, rect) in rects {
-        let Some(page_id) = pages.get(&(*page_no + 1)) else { continue };
+    for page_id in pages.values() {
         let page_obj = doc.get_object(*page_id)?;
-        let Some(lopdf::Object::Array(list)) = lget(&page_obj, b"Annots") else { continue };
+        let Some(lopdf::Object::Array(list)) = lget(&page_obj, b"Annots") else {
+            continue;
+        };
         let mut new_list = Vec::with_capacity(list.len());
         for a in list {
             let is_ref = matches!(a, lopdf::Object::Reference(_));
@@ -1174,10 +1180,11 @@ fn patch_highlights(path: &std::path::Path, rects: &[(u32, [f32; 4])]) -> anyhow
                 other => other.clone(),
             };
             let is_hl = lget(&obj, b"Subtype") == Some(lopdf::Object::Name(b"Highlight".to_vec()));
-            if is_hl {
+            let sin_quads = lget(&obj, b"QuadPoints").is_none();
+            if is_hl && sin_quads {
                 if let Some(lopdf::Object::Array(v)) = lget(&obj, b"Rect") {
                     let nums: Vec<f32> = v.iter().filter_map(|o| o.as_float().ok()).collect();
-                    if nums.len() == 4 && same_rect(&nums, rect) {
+                    if nums.len() == 4 {
                         let (x0, y0, x1, y1) = (nums[0], nums[1], nums[2], nums[3]);
                         // ORDEN DEL SPEC: UL, UR, LL, LR. Con el orden inverso
                         // pdfium pinta 27 px (un punto) en vez de la palabra
@@ -1391,8 +1398,15 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> Note
                 let first = s.doc_notes.len();
                 s.doc_notes.extend(added);
                 if let AnnotateReq::Highlight(idxs, _) = req {
-                    for (k, gi) in idxs.iter().enumerate() {
-                        s.err_anno.insert(*gi, first + k);
+                    let claves: Vec<(usize, u32, [f32; 4])> = idxs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(k, gi)| {
+                            s.doc_notes.get(first + k).map(|n| (*gi, n.page, [n.x0, n.y0, n.x1, n.y1]))
+                        })
+                        .collect();
+                    for (gi, page, rect) in claves {
+                        s.err_anno.insert(gi, (page, rect));
                     }
                 }
             }
@@ -1421,6 +1435,51 @@ fn words_in_rect(words: &[Word], r: [f32; 4]) -> Vec<[f32; 4]> {
         .filter(|w| w.x0 < x1 && x0 < w.x1 && w.y0 < y1 && y0 < w.y1)
         .map(|w| [w.x0, w.y0, w.x1, w.y1])
         .collect()
+}
+
+/// Palabras del rectángulo agrupadas por línea: cada línea sale como un
+/// rectángulo **continuo** (como al seleccionar texto en un PDF, sin dejar
+/// huecos entre palabras). Puro y testeable.
+fn words_in_lines(words: &[Word], r: [f32; 4]) -> Vec<[f32; 4]> {
+    let (x0, y0, x1, y1) = (r[0], r[1], r[2], r[3]);
+    let mut hits: Vec<&Word> = words
+        .iter()
+        .filter(|w| w.x0 < x1 && x0 < w.x1 && w.y0 < y1 && y0 < w.y1)
+        .collect();
+    if hits.is_empty() {
+        return vec![];
+    }
+    // de arriba abajo y de izquierda a derecha
+    hits.sort_by(|a, b| b.y1.total_cmp(&a.y1).then(a.x0.total_cmp(&b.x0)));
+    let mut lines: Vec<[f32; 4]> = vec![];
+    let mut cur: Option<[f32; 4]> = None;
+    for w in hits {
+        let misma = match cur {
+            Some(c) => {
+                let solape = (c[3].min(w.y1) - c[1].max(w.y0)).max(0.0);
+                let alto = (w.y1 - w.y0).max(0.1);
+                solape >= alto * 0.5
+            }
+            None => false,
+        };
+        if misma {
+            let mut c = cur.unwrap();
+            c[0] = c[0].min(w.x0);
+            c[1] = c[1].min(w.y0);
+            c[2] = c[2].max(w.x1);
+            c[3] = c[3].max(w.y1);
+            cur = Some(c);
+        } else {
+            if let Some(c) = cur {
+                lines.push(c);
+            }
+            cur = Some([w.x0, w.y0, w.x1, w.y1]);
+        }
+    }
+    if let Some(c) = cur {
+        lines.push(c);
+    }
+    lines
 }
 
 /// Texto de la anotación a partir del hallazgo (o el que escribió el usuario).
@@ -1554,7 +1613,7 @@ fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNot
     save_doc(doc, &out)?;
     // los resaltados necesitan /QuadPoints: los pone lopdf sobre el fichero
     if !hl_rects.is_empty() {
-        if let Err(e) = patch_highlights(&out, &hl_rects) {
+        if let Err(e) = patch_highlights(&out) {
             anyhow::bail!("no se pudo pintar el resaltado: {e:#}");
         }
         // el fichero cambió: se reabre para que el visor muestre el resaltado
@@ -1577,22 +1636,27 @@ fn hl_color(mode: u8, kind: &str) -> PdfColor {
 }
 
 /// Borra una anotación del PDF (y la quita de la lista en memoria).
-fn delete_anno(st: &mut State, idx: usize) -> anyhow::Result<()> {
+/// Borra **todas** las anotaciones que correspondan a esa nota (si el usuario
+/// comenta la misma palabra dos veces, se borran las dos y no queda ningún
+/// resaltado suelto).
+/// Borra las anotaciones de una página que están en ese rectángulo (las que
+/// sean: si el usuario comenta la misma palabra dos veces, se van las dos y no
+/// queda ningún resaltado suelto).
+fn delete_annos_at(st: &mut State, page: u32, rect: [f32; 4], kind: AnnoKind) -> anyhow::Result<usize> {
     let out = st.working.clone().context("sin copia de trabajo")?;
-    let n = st.doc_notes.get(idx).cloned().context("anotación no válida")?;
     let stale = st.doc_from.as_deref() != Some(out.as_path()) || st.doc_stamp != file_stamp(&out);
     if stale {
         open_doc_file(st, &out).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     }
     let doc = st.doc.as_mut().context("sin documento abierto")?;
     let mut pages = doc.pages_mut();
-    let mut pg = pages.get(n.page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    // se busca la anotación que coincide (tipo + rect + texto) y se borra
-    let mut target = None;
+    let mut pg = pages.get(page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    // se buscan las anotaciones que coinciden (tipo + rect)
+    let mut targets: Vec<usize> = vec![];
     {
         let anns = pg.annotations();
         for (i, a) in anns.iter().enumerate() {
-            let kind_ok = match (a.annotation_type(), n.kind) {
+            let kind_ok = match (a.annotation_type(), kind) {
                 (PdfPageAnnotationType::Text, AnnoKind::Note) => true,
                 (PdfPageAnnotationType::Highlight, AnnoKind::Highlight) => true,
                 _ => false,
@@ -1600,29 +1664,63 @@ fn delete_anno(st: &mut State, idx: usize) -> anyhow::Result<()> {
             if !kind_ok {
                 continue;
             }
-            let txt_ok = a.contents().as_deref() == Some(n.text.as_str());
             let rect_ok = a.bounds().map(|b| {
-                (b.left().value - n.x0).abs() < 0.5
-                    && (b.bottom().value - n.y0).abs() < 0.5
-                    && (b.right().value - n.x1).abs() < 0.5
-                    && (b.top().value - n.y1).abs() < 0.5
+                let (l, bo, r, t) = (b.left().value, b.bottom().value, b.right().value, b.top().value);
+                if kind == AnnoKind::Note {
+                    // las notas pegajosas se guardan como punto, pero en el PDF
+                    // son una cajita de 12x12: se busca la que lo contiene
+                    l <= rect[0] + 0.5 && r >= rect[0] - 0.5 && bo <= rect[1] + 0.5 && t >= rect[1] - 0.5
+                } else {
+                    (l - rect[0]).abs() < 0.5
+                        && (bo - rect[1]).abs() < 0.5
+                        && (r - rect[2]).abs() < 0.5
+                        && (t - rect[3]).abs() < 0.5
+                }
             }).unwrap_or(false);
-            if txt_ok && rect_ok {
-                target = Some(i);
-                break;
+            if rect_ok {
+                targets.push(i);
             }
         }
     }
-    let i = target.context("no se encontró la anotación en el PDF")?;
-    let mut anns = pg.annotations_mut();
-    let a = anns.get(i)?;
-    anns.delete_annotation(a)?;
-    drop(anns);
+    if targets.is_empty() {
+        anyhow::bail!("no se encontró la anotación en el PDF");
+    }
+    {
+        let mut anns = pg.annotations_mut();
+        // de mayor a menor: al borrar, los índices se mueven
+        for i in targets.iter().rev() {
+            let a = anns.get(*i)?;
+            anns.delete_annotation(a)?;
+        }
+    }
     drop(pg);
     drop(pages);
     let doc = st.doc.as_ref().context("sin documento abierto")?;
     save_doc(doc, &out)?;
-    st.doc_notes.remove(idx);
+    // pdfium puede perder los /QuadPoints al guardar: se reparan
+    patch_highlights(&out)?;
+    // y se quitan de la lista en memoria (las de esa zona)
+    st.doc_notes.retain(|n| {
+        if n.page != page || n.kind != kind {
+            return true;
+        }
+        match kind {
+            AnnoKind::Note => {
+                !(n.x0 <= rect[0] + 0.5 && n.x1 >= rect[0] - 0.5 && n.y0 <= rect[1] + 0.5 && n.y1 >= rect[1] - 0.5)
+            }
+            AnnoKind::Highlight => {
+                !((n.x0 - rect[0]).abs() < 0.5 && (n.y0 - rect[1]).abs() < 0.5
+                    && (n.x1 - rect[2]).abs() < 0.5 && (n.y1 - rect[3]).abs() < 0.5)
+            }
+        }
+    });
+    Ok(targets.len())
+}
+
+/// Borra una anotación del PDF (y la quita de la lista en memoria).
+fn delete_anno(st: &mut State, idx: usize) -> anyhow::Result<()> {
+    let n = st.doc_notes.get(idx).cloned().context("anotación no válida")?;
+    delete_annos_at(st, n.page, [n.x0, n.y0, n.x1, n.y1], n.kind)?;
     Ok(())
 }
 
@@ -2035,16 +2133,25 @@ fn main() -> anyhow::Result<()> {
                 notify(&ui, &st, "Arrastra un rectángulo (no un clic)".into());
                 return;
             }
-            // por palabras: se resaltan las que toque el rectángulo (como al
-            // seleccionar texto en un PDF). Si no pilla ninguna, el área tal cual.
+            // por texto: se resaltan las palabras que toque el rectángulo,
+            // agrupadas por línea (selección continua, sin huecos).
+            // Si no pilla ninguna, el área tal cual.
             let (rects, msg): (Vec<[f32; 4]>, String) = if por_palabras {
                 let hits = words_in_rect(&words, [ax, ay, bx, by]);
                 if hits.is_empty() {
                     (vec![[ax, ay, bx, by]], "Ahí no hay texto: se resalta el área".to_string())
                 } else {
                     let n = hits.len();
-                    let p = if n == 1 { "palabra" } else { "palabras" };
-                    (hits, format!("{n} {p} marcada{}: escribe el comentario y guarda", if n == 1 { "" } else { "s" }))
+                    let lineas = words_in_lines(&words, [ax, ay, bx, by]);
+                    let nl = lineas.len();
+                    (
+                        lineas,
+                        format!(
+                            "{n} palabra{} en {nl} línea{}: escribe el comentario y guarda",
+                            if n == 1 { "" } else { "s" },
+                            if nl == 1 { "" } else { "s" }
+                        ),
+                    )
                 }
             } else {
                 (vec![[ax, ay, bx, by]], "Zona marcada: escribe el comentario y guarda".to_string())
@@ -2173,7 +2280,7 @@ fn main() -> anyhow::Result<()> {
             // si es un grupo, se borran los resaltados de todos sus miembros
             let group = st.borrow().view_group.get(row as usize).cloned().flatten();
             // un solo préstamo: si se presta dos veces nested, el RefCell peta
-            let targets: Vec<usize> = {
+            let targets: Vec<(u32, [f32; 4])> = {
                 let s = st.borrow();
                 match &group {
                     Some(w) => s
@@ -2189,18 +2296,12 @@ fn main() -> anyhow::Result<()> {
             if targets.is_empty() {
                 return;
             }
-            // de mayor a menor: al borrar, los índices de la lista se mueven
-            let mut targets = targets;
-            targets.sort_unstable();
-            targets.reverse();
             let mut errs = 0;
-            for t in targets {
-                match with_state(&st, |s| delete_anno(s, t)) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        errs += 1;
-                        notify(&ui, &st, format!("No se pudo borrar: {e:#}"));
-                    }
+            for (page, rect) in targets {
+                let r = with_state(&st, |s| delete_annos_at(s, page, rect, AnnoKind::Highlight));
+                if let Err(e) = r {
+                    errs += 1;
+                    notify(&ui, &st, format!("No se pudo borrar: {e:#}"));
                 }
             }
             st.borrow_mut().err_anno.clear();
@@ -2397,6 +2498,16 @@ fn main() -> anyhow::Result<()> {
         ui.on_note_clicked(move |i| {
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_selected_note(if ui.get_selected_note() == i { -1 } else { i });
+                ui.set_note_text("".into());
+            }
+        });
+    }
+    {
+        // "Cancelar" en el editor del comentario: se cierra sin guardar
+        let ui_weak = ui.as_weak();
+        ui.on_note_cancel(move |_i| {
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_selected_note(-1);
                 ui.set_note_text("".into());
             }
         });
@@ -2868,7 +2979,10 @@ mod tests {
             settings: Settings::default(), err_anno: HashMap::new(), free_rects: None,
             page: 0, total: 3,
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
-            all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
+            all_errs: vec![
+                Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() },
+                Misspelling { word: "segundo".into(), sug: vec!["otro".into()], page: 1, x0: 72.0, y0: 600.0, x1: 130.0, y1: 612.0, dismissed: false, kind: "Sintaxis".into(), sev: "mínima".into() },
+            ],
             doc_notes: vec![],
             scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
         syn_received: false, lt_child: None,
@@ -2958,7 +3072,46 @@ mod tests {
             };
             assert_eq!(n, 0, "quedan anotaciones en el PDF");
         }
+        // Al borrar uno, los OTROS deben seguir con sus /QuadPoints (si no,
+        // se ve el comentario pero el resaltado desaparece).
+        let b = annotate_open(&mut st, &AnnotateReq::Highlight(vec![1], "otro".into())).unwrap();
+        st.doc_notes.extend(b);
+        assert_eq!(count_highlights_with_quads(&out), 1);
+        delete_anno(&mut st, 0).unwrap();
+        assert_eq!(count_highlights_with_quads(&out), 0, "no debe quedar ningún resaltado");
         let _ = std::fs::remove_file(&out);
+    }
+
+    /// Nº de resaltados del fichero que tienen /QuadPoints (o sea, que se ven).
+    fn count_highlights_with_quads(path: &std::path::Path) -> usize {
+        let doc = match lopdf::Document::load(path) {
+            Ok(d) => d,
+            Err(_) => return 0,
+        };
+        let mut n = 0;
+        for page_id in doc.get_pages().values() {
+            let page = match doc.get_object(*page_id) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if let Some(lopdf::Object::Array(anns)) = lget(&page, b"Annots") {
+                for a in anns {
+                    let obj = match &a {
+                        lopdf::Object::Reference(id) => match doc.get_object(*id) {
+                            Ok(o) => o.clone(),
+                            Err(_) => continue,
+                        },
+                        other => other.clone(),
+                    };
+                    if lget(&obj, b"Subtype") == Some(lopdf::Object::Name(b"Highlight".to_vec()))
+                        && lget(&obj, b"QuadPoints").is_some()
+                    {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
     }
 
     #[test]
@@ -3046,6 +3199,25 @@ mod tests {
         let entries = license_entries();
         let e = entries.first().unwrap();
         assert!(license_text(e.files).contains("GNU GENERAL PUBLIC LICENSE"));
+    }
+
+    /// Un resaltado por texto sale continuo: una banda por línea, sin huecos
+    /// entre palabras.
+    #[test]
+    fn el_resaltado_por_texto_sale_continuo_por_linea() {
+        let w = vec![
+            Word { text: "uno".into(), x0: 10.0, y0: 100.0, x1: 40.0, y1: 110.0 },
+            Word { text: "dos".into(), x0: 45.0, y0: 100.0, x1: 70.0, y1: 110.0 },
+            Word { text: "tres".into(), x0: 10.0, y0: 80.0, x1: 40.0, y1: 90.0 },
+            Word { text: "lejos".into(), x0: 200.0, y0: 100.0, x1: 240.0, y1: 110.0 },
+        ];
+        let lineas = words_in_lines(&w, [5.0, 75.0, 100.0, 115.0]);
+        assert_eq!(lineas.len(), 2, "una banda por línea");
+        // la primera línea une las dos palabras (sin hueco)
+        assert_eq!(lineas[0][0], 10.0);
+        assert_eq!(lineas[0][2], 70.0, "debe abarcar hasta la última palabra");
+        // la segunda línea va aparte
+        assert!(lineas.iter().any(|l| l[3] <= 91.0));
     }
 
     #[test]
