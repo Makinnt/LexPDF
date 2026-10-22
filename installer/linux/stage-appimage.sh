@@ -15,6 +15,8 @@ cp target/release/lexpdf "$APPDIR/usr/bin/"
 cp assets/pdfium/libpdfium.so "$APPDIR/usr/lib/"
 cp installer/linux/lexpdf.png "$APPDIR/"
 cp installer/linux/lexpdf.desktop "$APPDIR/"
+# licencias (ventana "Acerca de"):GPL-3, LGPL-2.1, Apache-2.0, MIT, BSD, iconos
+cp -r assets/licenses "$APPDIR/usr/share/lexpdf/licenses"
 if [ -d assets/lt ]; then
   cp -r assets/lt "$APPDIR/usr/share/lexpdf/lt"
 else

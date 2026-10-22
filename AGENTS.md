@@ -100,13 +100,23 @@ Flujos:
   `Object::get` choca con el prelude de pdfium (usar `Object::Dictionary(d)`).
   El parcheo se escribe a un temporal y se renombra (pdfium tiene el fichero
   mapeado: reescribirlo in situ lo rompe).
+  **GOTCHA `/QuadPoints` = orden del SPEC (UL, UR, LL, LR)**: con el orden
+  inverso (LL, LR, UR, UL) pdfium pinta **27 px (un punto)** en vez de la
+  palabra entera (1662 px) — medido contando píxeles. El test lo comprueba.
 - **Herramientas** (barra superior): 0 normal · 1 nota · 2 resaltar (arrastrar) ·
   3 borrar. El borrado se puede hacer desde la barra (pinchar el marcador) o
   desde la card del error (botón "Borrar", solo si tiene anotación).
+  **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
+  de la página, si no el scroll se come el arrastre del rectángulo.
 - **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
   `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
-  (preguntar/siempre/nunca), motor de revisión on/off y licencias. Se guardan
-  en `~/.config/lexpdf/settings.json` (0600).
+  (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".
+  Se guardan en `~/.config/lexpdf/settings.json` (0600).
+- **Acerca de / Licencias** (también creadas desde Rust): `AboutWindow` con el
+  hueco del logo + nombre + versión + botón, y `LicensesWindow` con la lista de
+  dependencias, el texto completo (ficheros en `assets/licenses/`) y el repo
+  (clicable → `xdg-open`/`open`/`cmd start`). `asset_file()` los busca junto al
+  exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo.
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
   24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
   de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
@@ -125,6 +135,9 @@ Flujos:
   `RefCell` peta ("RefCell already borrowed") y la app se cae. Por eso existe
   `with_state(c, f)`: presta, ejecuta y **suelta el préstamo antes de devolver**.
   Todo lo que toque el estado dentro de un `match` va con él.
+  **Ojo también con `let mut s = st.borrow_mut();` + `notify(&ui, &st, ...)`
+  en la misma función**: `notify` vuelve a prestar → peta. Suelta el préstamo
+  (o mete el `notify` en un bloque) antes de avisar.
 - Si no hay copia de trabajo, el panel de nota **no se cierra** al reintentar
   (el texto se conserva) y hay un botón "Crear copia de trabajo" en la barra
   lateral para crearla cuando quieras.

@@ -58,11 +58,13 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   repetidos (×5+) para no ver 40 veces la misma falta.
 - **Resaltados + comentarios** de verdad: al comentar un error se escribe una
   anotación `Highlight` en el PDF con su comentario, y se ve en **cualquier
-  lector** (no solo aquí). Se borran desde la propia card o con el 🗑 de la barra.
+  lector** (no solo aquí), resaltando la palabra **entera**. Se borran desde la
+  propia card o con el 🗑 de la barra.
+- **Resaltar texto libre**: el botón 🖌 de la barra, arrastras el rectángulo sobre
+  el texto y sale un comentario. Sale en amarillo (el color de un rotulador).
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
   visor. Al pasar el ratón por un marcador sale un tooltip con su texto.
 - Todo eso vive en `{nombre}_anotado.pdf`; **el original no se toca nunca**.
-- **Resaltar texto libre**: el botón 🖌 de la barra y arrastras el rectángulo.
 - Tema claro/oscuro (`PDF_DARK=1` para arrancar en oscuro).
 - Apertura directa por argumento: `cargo run -- doc.pdf`.
 
@@ -184,12 +186,15 @@ Y lo que **no** podemos prometerte:
 
 El botón ⚙ de la barra abre una ventana aparte con:
 
-- **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o amarillo único.
+- **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o
+  amarillo único. El texto libre siempre va en amarillo.
 - **Copia de trabajo**: preguntar al abrir / crearla siempre / nunca. Ahí van a parar
   las notas y los resaltados.
 - **Motor de revisión**: activado (el texto se revisa en local) o desactivado (no se
   envía ni una palabra a ningún proceso).
-- **Licencias** de todo lo que lleva dentro (Slint, PDFium, LanguageTool, Material Icons).
+- **Acerca de**: el logo, el nombre de la app y un botón con las **licencias
+  enteras** de cada dependencia (Slint, PDFium, LanguageTool, lopdf, los iconos…)
+  y el enlace a su repositorio.
 
 Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 
@@ -198,3 +203,4 @@ Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 **GPL-3.0-only** — ver `LICENSE` (la exige Slint, que va enlazado estáticamente).
 `pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`.
 Iconos: Apache-2.0 (Material Icons). Binarios de LanguageTool: LGPL, como sidecar aparte.
+Los textos completos están en `assets/licenses/` y se ven desde Ajustes → Acerca de.

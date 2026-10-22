@@ -113,6 +113,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> copy-mode: 0;   // 0 = preguntar, 1 = siempre, 2 = nunca
     in-out property <bool> motor-on: true;
     callback apply(int, int, bool);
+    callback open-about();
 
     VerticalLayout {
         padding: 18px;
@@ -228,18 +229,21 @@ export component SettingsWindow inherits Window {
             }
         }
 
-        // --- licencias
+        // --- acerca de
         VerticalLayout {
             spacing: 6px;
-            Text { text: "Licencias"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Text { text: "Acerca de"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Rectangle {
-                background: #2d2d2d; border-radius: 4px; border-width: 1px; border-color: #444;
-                VerticalLayout {
-                    padding: 10px; spacing: 4px;
-                    Text {
-                        text: "LexPDF · GPL-3.0-only (lo exige Slint, enlazado)\nSlint · GPL-3.0-only / Royalty-free\nPDFium (pdfium-render) · MIT/Apache-2.0\nPDFium · BSD-3-Clause (assets/pdfium/licenses/)\nLanguageTool (sidecar) · LGPL-2.1\nIconos Material Icons Outlined · Apache-2.0 (assets/icons/)";
-                        font-size: 11px; color: #ccc; wrap: word-wrap;
-                    }
+                height: 32px; border-radius: 4px;
+                background: #2d2d2d; border-width: 1px; border-color: #444;
+                Text {
+                    text: "Acerca de LexPDF"; font-size: 13px; color: #e8e8e8;
+                    width: parent.width; height: parent.height;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.open-about(); }
                 }
             }
             Text {
@@ -264,6 +268,155 @@ export component SettingsWindow inherits Window {
                 TouchArea {
                     width: parent.width; height: parent.height;
                     clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on); }
+                }
+            }
+        }
+    }
+}
+
+/// Una dependencia de la lista de licencias.
+struct LicRow {
+    name: string,
+    lic: string,
+}
+
+// Ventana "Acerca de": hueco para el logo, nombre de la app y botón de licencias.
+export component AboutWindow inherits Window {
+    title: "Acerca de LexPDF";
+    width: 460px;
+    height: 460px;
+    background: #1e1e1e;
+
+    in-out property <string> version: "";
+    in-out property <string> author: "";
+    callback open-licenses();
+    callback close-win();
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+
+        // --- hueco para el logo (pon tu imagen en assets/logo.png y
+        //     cámbiala por una Image)
+        Rectangle {
+            width: 104px; height: 104px;
+            background: #262626; border-radius: 16px;
+            border-width: 2px; border-color: #4a4a4a;
+            Text {
+                text: "LOGO"; font-size: 13px; color: #6a6a6a;
+                width: parent.width; height: parent.height;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+
+        Text { text: "LexPDF"; font-size: 26px; font-weight: 700; color: #e8e8e8; }
+        Text { text: root.author; font-size: 14px; color: #bbb; }
+        Text { text: root.version; font-size: 12px; color: #888; }
+        Text {
+            text: "Corrector ortográfico de escritorio. Todo el texto se revisa en tu equipo: no hay servidores ni telemetría.";
+            font-size: 12px; color: #aaa; wrap: word-wrap;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Rectangle {
+                height: 30px; border-radius: 4px;
+                background: #2d2d2d; border-width: 1px; border-color: #444;
+                Text {
+                    text: "Licencias"; font-size: 13px; color: #e8e8e8;
+                    width: parent.width; height: parent.height;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.open-licenses(); }
+                }
+            }
+            Rectangle {
+                height: 30px; border-radius: 4px;
+                background: #e8e8e8;
+                Text {
+                    text: "Cerrar"; font-size: 13px; color: #111;
+                    width: parent.width; height: parent.height;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.close-win(); }
+                }
+            }
+        }
+    }
+}
+
+// Ventana de licencias: lista a la izquierda, texto completo + repo a la derecha.
+export component LicensesWindow inherits Window {
+    title: "Licencias · LexPDF";
+    width: 820px;
+    height: 620px;
+    background: #1e1e1e;
+
+    in-out property <[LicRow]> items;
+    in-out property <int> sel: 0;
+    in-out property <string> cur-name: "";
+    in-out property <string> cur-lic: "";
+    in-out property <string> cur-repo: "";
+    in-out property <string> cur-text: "";
+    callback select(int);
+    callback open-link(string);
+
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+
+        VerticalLayout {
+            width: 210px;
+            spacing: 2px;
+            for it[i] in root.items: Rectangle {
+                height: 26px; border-radius: 4px;
+                background: root.sel == i ? #3c3c3c : #262626;
+                Text {
+                    text: it.name; font-size: 12px; color: #ddd;
+                    x: 8px; width: parent.width - 12px; height: parent.height;
+                    vertical-alignment: center; overflow: elide;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.select(i); }
+                }
+            }
+        }
+
+        Rectangle { width: 1px; background: #3d3d3d; }
+
+        VerticalLayout {
+            spacing: 6px;
+            horizontal-stretch: 1;
+            Text { text: root.cur-name; font-size: 16px; font-weight: 700; color: #e8e8e8; }
+            Text { text: root.cur-lic; font-size: 12px; color: #aaa; }
+            Rectangle {
+                height: 26px; border-radius: 4px;
+                background: #262626; border-width: 1px; border-color: #444;
+                Text {
+                    text: root.cur-repo; font-size: 12px; color: #7fb3ff;
+                    x: 8px; width: parent.width - 16px; height: parent.height;
+                    vertical-alignment: center; overflow: elide;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    clicked => { root.open-link(root.cur-repo); }
+                }
+            }
+            Flickable {
+                vertical-stretch: 1;
+                Text {
+                    text: root.cur-text;
+                    width: 540px;
+                    wrap: word-wrap;
+                    font-size: 11px; color: #bbb;
                 }
             }
         }
@@ -772,6 +925,9 @@ export component AppWindow inherits Window {
                 if (root.has-doc): Flickable {
                     min-height: 200px;
                     vertical-stretch: 1;
+                    // en modo resaltar (2) el scroll se apaga: si no, el
+                    // Flickable se come el arrastre del rectángulo
+                    interactive: root.tool-mode != 2;
                     content-width: root.img-w * 1px;
                     content-height: root.img-h * 1px;
                     content-x <=> root.view-x;

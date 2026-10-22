@@ -997,6 +997,145 @@ fn save_settings(s: &Settings) {
     let _ = std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 }
 
+/// Una dependencia y su licencia (ventana "Licencias").
+#[derive(Clone)]
+struct LicInfo {
+    name: &'static str,
+    lic: &'static str,
+    repo: &'static str,
+    files: &'static [&'static str],
+}
+
+/// Todo lo que lleva dentro la app, con su licencia y su repo.
+/// `files` son nombres de `assets/licenses/` (se copian junto al programa).
+fn license_entries() -> Vec<LicInfo> {
+    vec![
+        LicInfo { name: "LexPDF (esta app)", lic: "GPL-3.0-only", repo: "https://github.com/Makinnt/LexPDF", files: &["GPL-3.txt"] },
+        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only (o licencia comercial de Slint)", repo: "https://github.com/slint-ui/slint", files: &["GPL-3.txt"] },
+        LicInfo { name: "PDFium (motor de render)", lic: "BSD-3-Clause", repo: "https://pdfium.googlesource.com/pdfium/", files: &["PDFIUM-BSD.txt"] },
+        LicInfo { name: "pdfium-render", lic: "MIT o Apache-2.0", repo: "https://github.com/bblanchon/pdfium-render", files: &["MIT.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "LanguageTool (motor de revisión)", lic: "LGPL-2.1", repo: "https://github.com/languagetool-org/languagetool", files: &["LGPL-2.1.txt"] },
+        LicInfo { name: "lopdf", lic: "MIT", repo: "https://github.com/jamesduffy/lopdf", files: &["MIT.txt"] },
+        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT o Apache-2.0", repo: "https://github.com/algesten/ureq", files: &["MIT.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "image", lic: "MIT o Apache-2.0", repo: "https://github.com/image-rs/image", files: &["MIT.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "rfd (diálogo de archivos)", lic: "MIT", repo: "https://github.com/EmilHerngren/rfd", files: &["MIT.txt"] },
+        LicInfo { name: "anyhow", lic: "MIT o Apache-2.0", repo: "https://github.com/dtolnay/anyhow", files: &["MIT.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "serde / serde_json", lic: "MIT o Apache-2.0", repo: "https://github.com/serde-rs/serde", files: &["MIT.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "Material Icons Outlined", lic: "Apache-2.0", repo: "https://github.com/google/material-design-icons", files: &["Material-Icons-Apache-2.0.txt", "Apache-2.0.txt"] },
+    ]
+}
+
+/// Busca un fichero de `assets/licenses/`: junto al programa (empaquetado),
+/// en el AppImage (usr/share/lexpdf) o en el repo (desarrollo).
+fn asset_file(name: &str) -> Option<PathBuf> {
+    let mut cands: Vec<PathBuf> = vec![];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(d) = exe.parent() {
+            cands.push(d.join("licenses").join(name));
+            cands.push(d.join("assets/licenses").join(name));
+            cands.push(d.join("../share/lexpdf/licenses").join(name));
+        }
+    }
+    cands.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/licenses").join(name));
+    cands.into_iter().find(|c| c.is_file())
+}
+
+/// Texto completo de una licencia (varios ficheros = licencia dual).
+fn license_text(files: &[&str]) -> String {
+    let mut out = String::new();
+    for f in files {
+        match asset_file(f) {
+            Some(p) => match std::fs::read_to_string(&p) {
+                Ok(t) => out.push_str(&format!("===== {} =====\n\n{}", f, t)),
+                Err(e) => out.push_str(&format!("(no se pudo leer {f}: {e})\n")),
+            },
+            None => out.push_str(&format!("(no se encontró {f})\n")),
+        }
+        out.push_str("\n\n");
+    }
+    out
+}
+
+/// Abre una URL en el navegador del sistema (best effort).
+fn open_link(url: &str) {
+    let mut c = if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    } else if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg(url);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    c.stdout(std::process::Stdio::null());
+    c.stderr(std::process::Stdio::null());
+    let _ = c.spawn();
+}
+
+/// Abre la ventana "Acerca de": hueco para el logo, nombre de la app y el
+/// botón que lleva a las licencias completas.
+fn open_about(about: &Rc<RefCell<Option<AboutWindow>>>, lic: &Rc<RefCell<Option<LicensesWindow>>>) {
+    let mut slot = about.borrow_mut();
+    if slot.is_none() {
+        let Ok(w) = AboutWindow::new() else { return };
+        w.set_version(format!("versión {}", env!("CARGO_PKG_VERSION")).into());
+        w.set_author("por Jose Cauich".into());
+        let l2 = lic.clone();
+        w.on_open_licenses(move || open_licenses(&l2));
+        let weak = w.as_weak();
+        w.on_close_win(move || {
+            if let Some(w) = weak.upgrade() {
+                let _ = w.window().hide();
+            }
+        });
+        *slot = Some(w);
+    }
+    if let Some(w) = slot.as_ref() {
+        let _ = w.window().show();
+    }
+}
+
+/// Abre la ventana de licencias: lista de dependencias + texto completo y repo.
+fn open_licenses(lic: &Rc<RefCell<Option<LicensesWindow>>>) {
+    let entries = license_entries();
+    let mut slot = lic.borrow_mut();
+    if slot.is_none() {
+        let Ok(w) = LicensesWindow::new() else { return };
+        let rows: Vec<LicRow> = entries
+            .iter()
+            .map(|e| LicRow { name: e.name.into(), lic: e.lic.into() })
+            .collect();
+        w.set_items(ModelRc::new(VecModel::from_slice(&rows)));
+        let weak = w.as_weak();
+        let entries2 = entries.clone();
+        w.on_select(move |i| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(e) = entries2.get(i as usize) else { return };
+            w.set_sel(i);
+            w.set_cur_name(e.name.into());
+            w.set_cur_lic(e.lic.into());
+            w.set_cur_repo(e.repo.into());
+            w.set_cur_text(license_text(e.files).into());
+        });
+        w.on_open_link(move |url| open_link(&url));
+        *slot = Some(w);
+    }
+    if let Some(w) = slot.as_ref() {
+        if let Some(e) = entries.first() {
+            w.set_sel(0);
+            w.set_cur_name(e.name.into());
+            w.set_cur_lic(e.lic.into());
+            w.set_cur_repo(e.repo.into());
+            w.set_cur_text(license_text(e.files).into());
+        }
+        let _ = w.window().show();
+    }
+}
+
 /// Parchea los resaltados recién creados: pdfium no puede poner los
 /// `/QuadPoints` (sin ellos no se dibuja el resaltado en ningún lector) ni la
 /// transparencia. lopdf mete ambas cosas en el fichero ya guardado.
@@ -1026,11 +1165,14 @@ fn patch_highlights(path: &std::path::Path, rects: &[(u32, [f32; 4])]) -> anyhow
                     let nums: Vec<f32> = v.iter().filter_map(|o| o.as_float().ok()).collect();
                     if nums.len() == 4 && same_rect(&nums, rect) {
                         let (x0, y0, x1, y1) = (nums[0], nums[1], nums[2], nums[3]);
+                        // ORDEN DEL SPEC: UL, UR, LL, LR. Con el orden inverso
+                        // pdfium pinta 27 px (un punto) en vez de la palabra
+                        // entera: comprobado midiendo pixeles.
                         let qp = lopdf::Object::Array(vec![
+                            lopdf::Object::Real(x0), lopdf::Object::Real(y1),
+                            lopdf::Object::Real(x1), lopdf::Object::Real(y1),
                             lopdf::Object::Real(x0), lopdf::Object::Real(y0),
                             lopdf::Object::Real(x1), lopdf::Object::Real(y0),
-                            lopdf::Object::Real(x1), lopdf::Object::Real(y1),
-                            lopdf::Object::Real(x0), lopdf::Object::Real(y1),
                         ]);
                         if let lopdf::Object::Dictionary(d) = &mut obj {
                             d.set(b"QuadPoints", qp);
@@ -1212,6 +1354,8 @@ enum NoteResult {
 }
 
 /// Aplica una anotación y la deja visible al momento. Si no hay copia de
+
+/// Aplica una anotación y la deja visible al momento. Si no hay copia de
 /// trabajo, se pregunta antes de crearla (y se devuelve `Pending`).
 fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> NoteResult {
     if st.borrow().working.is_none() {
@@ -1250,22 +1394,6 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> Note
         Err(e) => {
             notify(ui, st, format!("Error al anotar: {e:#}"));
             NoteResult::Failed
-        }
-    }
-}
-
-fn marker(img: &mut image::RgbaImage, x: f32, y: f32) {
-    let (iw, ih) = (img.width() as i64, img.height() as i64);
-    for dx in 0..8i64 {
-        for dy in 0..8i64 {
-            let (px, py) = (x.round() as i64 + dx, y.round() as i64 + dy);
-            if px < 0 || py < 0 || px >= iw || py >= ih {
-                continue;
-            }
-            let p = img.get_pixel_mut(px as u32, py as u32);
-            p[0] = 255;
-            p[1] = 179;
-            p[2] = 0;
         }
     }
 }
@@ -1408,13 +1536,15 @@ fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNot
 }
 
 /// Color del resaltado: por gravedad (rojo/morado) o amarillo único.
+/// El texto libre no tiene gravedad -> siempre amarillo (el clásico rotulador).
 fn hl_color(mode: u8, kind: &str) -> PdfColor {
     if mode == 1 {
         return PdfColor::new(255, 214, 0, 255);
     }
     match kind {
         "Sintaxis" => PdfColor::new(106, 27, 154, 255),
-        _ => PdfColor::new(211, 47, 47, 255),
+        "Ortografía" => PdfColor::new(211, 47, 47, 255),
+        _ => PdfColor::new(255, 214, 0, 255),
     }
 }
 
@@ -1495,10 +1625,8 @@ fn show(ui: &AppWindow, st: &mut State, page: u32) {
             let (x, y, w, hh) = pdf_to_image(h.x0, h.y0, h.x1, h.y1, pw, ph, iw, ih);
             underline(&mut rgba, x, y + hh - 3.0, w, under_color(&h.kind));
         }
-        for n in s.doc_notes.iter().filter(|n| n.page == page) {
-            let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
-            marker(&mut rgba, x, y);
-        }
+        // las anotaciones (resaltados y sticky) las dibuja pdfium: nuestro
+        // marcador cuadrado tapaba el resaltado real (parecía un punto)
         // flash amarillo 5s del error clicado
         if let Some((fi, t)) = &s.flash {
             if t.elapsed() < std::time::Duration::from_secs(5) {
@@ -1945,9 +2073,11 @@ fn main() -> anyhow::Result<()> {
             }
             ui.set_tool_mode(2);
             ui.set_free_note_on(false);
-            let mut s = st.borrow_mut();
-            s.free_pt = None;
-            s.free_rect = None;
+            {
+                let mut s = st.borrow_mut();
+                s.free_pt = None;
+                s.free_rect = None;
+            }
             notify(&ui, &st, "Arrastra sobre el texto que quieras resaltar".into());
         });
     }
@@ -1998,16 +2128,19 @@ fn main() -> anyhow::Result<()> {
             };
             // si es un grupo, se borran los resaltados de todos sus miembros
             let group = st.borrow().view_group.get(row as usize).cloned().flatten();
-            let targets: Vec<usize> = match group {
-                Some(w) => st
-                    .borrow()
-                    .all_errs
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| e.word == w)
-                    .filter_map(|(k, _)| st.borrow().err_anno.get(&k).copied())
-                    .collect(),
-                None => st.borrow().err_anno.get(&gi).copied().into_iter().collect(),
+            // un solo préstamo: si se presta dos veces nested, el RefCell peta
+            let targets: Vec<usize> = {
+                let s = st.borrow();
+                match &group {
+                    Some(w) => s
+                        .all_errs
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, e)| &e.word == w)
+                        .filter_map(|(k, _)| s.err_anno.get(&k).copied())
+                        .collect(),
+                    None => s.err_anno.get(&gi).copied().into_iter().collect(),
+                }
             };
             if targets.is_empty() {
                 return;
@@ -2041,7 +2174,11 @@ fn main() -> anyhow::Result<()> {
         let ui_weak = ui.as_weak();
         let st = st.clone();
         let win: Rc<RefCell<Option<SettingsWindow>>> = Rc::new(RefCell::new(None));
+        let about: Rc<RefCell<Option<AboutWindow>>> = Rc::new(RefCell::new(None));
+        let lic: Rc<RefCell<Option<LicensesWindow>>> = Rc::new(RefCell::new(None));
         let win2 = win.clone();
+        let about2 = about.clone();
+        let lic2 = lic.clone();
         ui.on_open_settings(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let s = st.borrow().settings;
@@ -2052,6 +2189,9 @@ fn main() -> anyhow::Result<()> {
                         w.set_hl_color(s.hl_color as i32);
                         w.set_copy_mode(s.copy_mode as i32);
                         w.set_motor_on(s.motor);
+                        let a3 = about2.clone();
+                        let l3 = lic2.clone();
+                        w.on_open_about(move || open_about(&a3, &l3));
                         let st2 = st.clone();
                         let ui2 = ui_weak.clone();
                         w.on_apply(move |hl, copy, motor| {
@@ -2750,6 +2890,27 @@ mod tests {
                 if lget(&obj, b"Subtype") == Some(lopdf::Object::Name(b"Highlight".to_vec())) {
                     assert!(lget(&obj, b"QuadPoints").is_some(), "falta /QuadPoints");
                     assert!(lget(&obj, b"CA").is_some(), "falta /CA (transparencia)");
+                    // ORDEN DEL SPEC (UL, UR, LL, LR): con el orden inverso pdfium
+                    // pinta 27 px (un punto) en vez de la palabra entera
+                    let qp = match lget(&obj, b"QuadPoints") {
+                        Some(lopdf::Object::Array(v)) => {
+                            v.iter().filter_map(|o| o.as_float().ok()).collect::<Vec<f32>>()
+                        }
+                        _ => panic!("/QuadPoints no es un array"),
+                    };
+                    assert_eq!(qp.len(), 8, "se esperaban 8 coordenadas");
+                    let rect = match lget(&obj, b"Rect") {
+                        Some(lopdf::Object::Array(v)) => {
+                            v.iter().filter_map(|o| o.as_float().ok()).collect::<Vec<f32>>()
+                        }
+                        _ => panic!("/Rect no es un array"),
+                    };
+                    let (x0, y0, x1, y1) = (rect[0], rect[1], rect[2], rect[3]);
+                    let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+                    assert!(near(qp[0], x0) && near(qp[1], y1), "UL incorrecto: {qp:?}");
+                    assert!(near(qp[2], x1) && near(qp[3], y1), "UR incorrecto: {qp:?}");
+                    assert!(near(qp[4], x0) && near(qp[5], y0), "LL incorrecto: {qp:?}");
+                    assert!(near(qp[6], x1) && near(qp[7], y0), "LR incorrecto: {qp:?}");
                     found = true;
                 }
             }

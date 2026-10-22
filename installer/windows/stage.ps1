@@ -9,6 +9,8 @@ cargo build --release
 New-Item -ItemType Directory -Force dist/windows | Out-Null
 Copy-Item target/release/lexpdf.exe dist/windows/
 Copy-Item assets/pdfium/pdfium.dll dist/windows/
+# licencias (ventana "Acerca de")
+Copy-Item assets/licenses dist/windows/licenses -Recurse -Force
 if (Test-Path assets/lt/languagetool-server.jar) {
   Copy-Item assets/lt dist/windows/lt -Recurse -Force
 } else {
