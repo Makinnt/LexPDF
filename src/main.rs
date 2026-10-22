@@ -960,6 +960,7 @@ fn push_history(ui: &AppWindow) {
 /// Ajustes del usuario (ventana aparte). Se guardan en
 /// `~/.config/lexpdf/settings.json` (0600, como el historial).
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)] // si falta un campo (ajustes viejos) se usa el de por defecto
 struct Settings {
     /// 0 = color por gravedad (rojo/morado) · 1 = amarillo único
     hl_color: u8,
@@ -967,13 +968,16 @@ struct Settings {
     copy_mode: u8,
     /// false = no se envía texto a ningún motor (sin revisión)
     motor: bool,
-    /// resaltado libre: 0 = por área (rectángulo), 1 = por palabras
+    /// resaltado libre: 0 = por área (rectángulo), 1 = por texto
     free_sel: u8,
+    /// con free_sel=1: 0 = por recuadro (una caja por palabra), 1 = selección
+    /// real de texto (una banda continua por línea)
+    free_text: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0 }
+        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0, free_text: 0 }
     }
 }
 
@@ -2125,6 +2129,7 @@ fn main() -> anyhow::Result<()> {
             let (pw, ph, iw, ih) = (s.page_w, s.page_h, s.img_w as f32, s.img_h as f32);
             let pg = s.page;
             let por_palabras = s.settings.free_sel == 1;
+            let por_recuadro = s.settings.free_text == 0; // 0 = caja por palabra
             let words = s.words.clone();
             drop(s);
             // px de imagen → puntos PDF (y invertido)
@@ -2140,6 +2145,15 @@ fn main() -> anyhow::Result<()> {
                 let hits = words_in_rect(&words, [ax, ay, bx, by]);
                 if hits.is_empty() {
                     (vec![[ax, ay, bx, by]], "Ahí no hay texto: se resalta el área".to_string())
+                } else if por_recuadro {
+                    let n = hits.len();
+                    (
+                        hits,
+                        format!(
+                            "{n} palabra{} en su propia caja: escribe el comentario y guarda",
+                            if n == 1 { "" } else { "s" }
+                        ),
+                    )
                 } else {
                     let n = hits.len();
                     let lineas = words_in_lines(&words, [ax, ay, bx, by]);
@@ -2335,14 +2349,21 @@ fn main() -> anyhow::Result<()> {
                         w.set_copy_mode(s.copy_mode as i32);
                         w.set_motor_on(s.motor);
                         w.set_free_sel(s.free_sel as i32);
+                        w.set_free_text(s.free_text as i32);
                         let a3 = about2.clone();
                         let l3 = lic2.clone();
                         w.on_open_about(move || open_about(&a3, &l3));
                         let st2 = st.clone();
                         let ui2 = ui_weak.clone();
-                        w.on_apply(move |hl, copy, motor, fsel| {
+                        w.on_apply(move |hl, copy, motor, fsel, ftext| {
                             let Some(ui) = ui2.upgrade() else { return };
-                            let s2 = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor, free_sel: fsel as u8 };
+                            let s2 = Settings {
+                                hl_color: hl as u8,
+                                copy_mode: copy as u8,
+                                motor,
+                                free_sel: fsel as u8,
+                                free_text: ftext as u8,
+                            };
                             save_settings(&s2);
                             {
                                 let mut stt = st2.borrow_mut();
@@ -2367,6 +2388,7 @@ fn main() -> anyhow::Result<()> {
                 w.set_copy_mode(s.copy_mode as i32);
                 w.set_motor_on(s.motor);
                 w.set_free_sel(s.free_sel as i32);
+                w.set_free_text(s.free_text as i32);
             }
             if let Some(w) = slot.as_ref() {
                 let _ = w.window().show();
@@ -3177,11 +3199,16 @@ mod tests {
     #[test]
     fn los_ajustes_se_leen_del_json() {
         let s: Settings =
-            serde_json::from_str(r#"{"hl_color":1,"copy_mode":2,"motor":false,"free_sel":1}"#).unwrap();
+            serde_json::from_str(r#"{"hl_color":1,"copy_mode":2,"motor":false,"free_sel":1,"free_text":1}"#).unwrap();
         assert_eq!(s.hl_color, 1);
         assert_eq!(s.copy_mode, 2);
         assert!(!s.motor);
         assert_eq!(s.free_sel, 1);
+        assert_eq!(s.free_text, 1);
+        // un fichero de ajustes viejo (sin el campo nuevo) se sigue leyendo
+        let viejo: Settings =
+            serde_json::from_str(r#"{"hl_color":0,"copy_mode":0,"motor":true,"free_sel":0}"#).unwrap();
+        assert_eq!(viejo.free_text, 0);
     }
 
     /// El texto de cada licencia debe ser el de verdad (y no el de otra).

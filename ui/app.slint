@@ -111,14 +111,15 @@ component DropSel inherits Rectangle {
 export component SettingsWindow inherits Window {
     title: "Ajustes · LexPDF";
     width: 520px;
-    height: 780px;
+    height: 860px;
     background: #1e1e1e;
 
     in-out property <int> hl-color: 0;    // 0 = por gravedad, 1 = amarillo
     in-out property <int> copy-mode: 0;   // 0 = preguntar, 1 = siempre, 2 = nunca
     in-out property <bool> motor-on: true;
-    in-out property <int> free-sel: 0;    // 0 = área, 1 = palabras
-    callback apply(int, int, bool, int);
+    in-out property <int> free-sel: 0;    // 0 = área, 1 = texto
+    in-out property <int> free-text: 0;   // con free-sel=1: 0 = recuadros, 1 = selección
+    callback apply(int, int, bool, int, int);
     callback open-about();
 
     VerticalLayout {
@@ -132,7 +133,11 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
             Text { text: "Color del resaltado"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Text {
-                text: "Por gravedad: rojo = ortografía, morado = sintaxis. Amarillo: uno solo para todo.";
+                text: "• Por gravedad: rojo = ortografía, morado = sintaxis.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "• Amarillo único: todos los resaltados en amarillo.";
                 font-size: 12px; color: #aaa; wrap: word-wrap;
             }
             HorizontalLayout {
@@ -169,7 +174,11 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
             Text { text: "Resaltar texto libre"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Text {
-                text: "Área: se resalta el rectángulo tal cual. Texto: se resaltan las palabras que toque el rectángulo, en una sola banda continua, como al seleccionar texto en un PDF.";
+                text: "• Por área: se resalta el rectángulo tal cual.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "• Por texto: se resaltan las palabras que toque el rectángulo.";
                 font-size: 12px; color: #aaa; wrap: word-wrap;
             }
             HorizontalLayout {
@@ -199,6 +208,45 @@ export component SettingsWindow inherits Window {
                     TouchArea { width: parent.width; height: parent.height; clicked => { root.free-sel = 1; } }
                 }
             }
+            // sub-opción: solo si se ha elegido "Por texto"
+            if (root.free-sel == 1): VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: "• Por recuadro: cada palabra va en su propia caja.";
+                    font-size: 12px; color: #aaa; wrap: word-wrap;
+                }
+                Text {
+                    text: "• Selección de texto: una banda continua por línea, como al seleccionar en un PDF.";
+                    font-size: 12px; color: #aaa; wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                        background: root.free-text == 0 ? #e8e8e8 : #333;
+                        border-width: 1px; border-color: #555;
+                        Text {
+                            text: "Por recuadro"; font-size: 13px;
+                            color: root.free-text == 0 ? #111 : #e8e8e8;
+                            width: parent.width; height: parent.height;
+                            horizontal-alignment: center; vertical-alignment: center;
+                        }
+                        TouchArea { width: parent.width; height: parent.height; clicked => { root.free-text = 0; } }
+                    }
+                    Rectangle {
+                        height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                        background: root.free-text == 1 ? #e8e8e8 : #333;
+                        border-width: 1px; border-color: #555;
+                        Text {
+                            text: "Selección de texto"; font-size: 13px;
+                            color: root.free-text == 1 ? #111 : #e8e8e8;
+                            width: parent.width; height: parent.height;
+                            horizontal-alignment: center; vertical-alignment: center;
+                        }
+                        TouchArea { width: parent.width; height: parent.height; clicked => { root.free-text = 1; } }
+                    }
+                }
+            }
         }
 
         // --- copia de trabajo
@@ -206,8 +254,20 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
             Text { text: "Copia de trabajo para las notas"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Text {
-                text: "Las notas y los resaltados se guardan en {nombre}_anotado.pdf. El original nunca se toca.";
+                text: "• Preguntar: te aviso al abrir un documento.";
                 font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "• Crear siempre: la creo yo sin preguntar.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "• Nunca: solo si la pides al guardar una nota.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "Las notas van a {nombre}_anotado.pdf. El original nunca se toca.";
+                font-size: 12px; color: #888; wrap: word-wrap;
             }
             HorizontalLayout {
                 spacing: 8px;
@@ -255,7 +315,11 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
             Text { text: "Motor de revisión"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
             Text {
-                text: "El texto de cada página se revisa con LanguageTool en este PC (nunca sale a Internet). Si lo desactivas, no se envía texto a ningún proceso y no hay corrección.";
+                text: "• Activado: el texto se revisa con LanguageTool en este PC (nunca sale a Internet).";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            Text {
+                text: "• Desactivado: no se envía ni una palabra a ningún proceso (no hay corrección).";
                 font-size: 12px; color: #aaa; wrap: word-wrap;
             }
             Rectangle {
@@ -310,7 +374,7 @@ export component SettingsWindow inherits Window {
                 }
                 TouchArea {
                     width: parent.width; height: parent.height;
-                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on, root.free-sel); }
+                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on, root.free-sel, root.free-text); }
                 }
             }
         }

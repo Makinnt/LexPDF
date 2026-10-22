@@ -109,7 +109,11 @@ Flujos:
   **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
   de la página, si no el scroll se come el arrastre del rectángulo.
   El resaltado libre puede ser **por área** (el rectángulo) o **por texto**
-  (`words_in_lines()`): una anotación Highlight por línea, continua.
+  (`free_sel=1`). Con `free_sel=1` hay una sub-opción (`free_text`): 0 = por
+  recuadro (`words_in_rect()`, una anotación por palabra) · 1 = selección real
+  de texto (`words_in_lines()`, una anotación continua por línea). El ajuste
+  nuevo es `free_text` en `settings.json` (con `#[serde(default)]` para que los
+  ficheros de ajustes viejos sigan leyéndose).
 - **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
   `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
   (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".

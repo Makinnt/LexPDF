@@ -62,9 +62,10 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   propia card o con el 🗑 de la barra.
 - **Resaltar texto libre**: el botón 🖌 de la barra, arrastras el rectángulo sobre
   el texto y sale un comentario. Sale en amarillo (el color de un rotulador).
-  En Ajustes puedes elegir **por área** (el rectángulo tal cual) o **por texto**
-  (se resaltan las palabras que toque, **en una sola banda continua**, como al
-  seleccionar texto en un PDF).
+  En Ajustes puedes elegir **por área** (el rectángulo tal cual) o **por texto**.
+  Con "por texto" sale una opción más: **por recuadro** (cada palabra en su
+  propia caja) o **selección de texto** (una sola banda continua por línea,
+  como al seleccionar texto en un PDF).
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
   visor. Al pasar el ratón por un resaltado o una nota sale un tooltip con su
   comentario.
@@ -192,7 +193,9 @@ El botón ⚙ de la barra abre una ventana aparte con:
 
 - **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o
   amarillo único. El texto libre siempre va en amarillo.
-- **Resaltar texto libre**: por área o por texto (ver arriba).
+- **Resaltar texto libre**: por área o por texto. Si eliges "por texto", sale
+  una sub-opción: por recuadro (una caja por palabra) o selección de texto (una
+  banda continua por línea).
 - **Copia de trabajo**: preguntar al abrir / crearla siempre / nunca. Ahí van a parar
   las notas y los resaltados.
 - **Motor de revisión**: activado (el texto se revisa en local) o desactivado (no se
