@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::Context;
 use pdfium_render::prelude::*;
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, StyledText, Timer, TimerMode, VecModel};
+use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode, VecModel};
 
 slint::include_modules!();
 
@@ -1829,11 +1829,12 @@ fn push_page_notes(ui: &AppWindow, st: &State) {
             // resaltado usa su rectángulo entero, para que el tooltip salga
             // al pasar por encima del texto resaltado.
             let (x, y, w, h) = if w < 4.0 || h < 4.0 { (x - 12.0, y - 12.0, 24.0, 24.0) } else { (x, y, w.max(24.0), h.max(12.0)) };
-            let mut t: String = n.text.chars().take(200).collect();
-            if n.text.chars().count() > 200 {
+            // el chip del comentario es de una linea: se acorta
+            let mut t: String = n.text.chars().take(45).collect();
+            if n.text.chars().count() > 45 {
                 t.push('…');
             }
-            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y, w, h, idx: i as i32 }
+            NoteRow { text: t.into(), page: n.page as i32, x, y, w, h, idx: i as i32 }
         })
         .collect();
     ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));

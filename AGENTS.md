@@ -146,12 +146,20 @@ Flujos:
 - **GOTCHA `Tooltip`**: el `Tooltip` tiene que ir **dentro** del `TouchArea`
   (si cuelga del `Rectangle` padre, el hover lo tiene el hijo y el tooltip no
   sale nunca). El tooltip es una ventana emergente aparte: para verlo hay que
-  capturar la pantalla entera, no la ventana de la app.
+  capturar la pantalla entera, no la ventana de la app. (En las notas ya
+  existentes se usa un chip propio en vez del `Tooltip`.)
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
-  sensible con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms de retardo):
-  el **resaltado usa su rectángulo entero** (así el comentario sale al pasar por
-  encima del texto resaltado) y la **nota pegajosa una cajita 24×24** sobre su
-  marcador → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
+  sensible: el **resaltado usa su rectángulo entero** (así el comentario sale al
+  pasar por encima del texto resaltado) y la **nota pegajosa una cajita 24×24**
+  sobre su marcador → `show()` rellena `page-notes` con `pdf_to_image` y
+  `note-total`.
+  **El comentario sale en un CHIP PROPIO encima del resaltado**, no con el
+  `Tooltip` de Slint: el `Tooltip` nativo siempre sale debajo del puntero y no
+  se puede colocar (su `offset` no es público). El chip se dibuja dentro de la
+  imagen de la página (se mueve con el scroll) y aparece con
+  `if (ta.has-hover)` (el `TouchArea` de la nota). Ojo: `has-hover` es del
+  `TouchArea`, no del `Rectangle`; en Slint 1.18 no hay `MouseArea` ni
+  `pointer-event`.
   **GOTCHA**: el `TouchArea` de esas zonas solo está activo en modo normal y
   borrar (`enabled: root.tool-mode == 0 || root.tool-mode == 3`): si está
   activo siempre, se come el arrastre del resaltado libre y el clic de la nota.

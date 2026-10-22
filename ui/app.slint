@@ -25,7 +25,7 @@ struct ErrRow {
 }
 
 struct NoteRow {
-    text: styled-text,   // texto plano (sin markdown)
+    text: string,   // el comentario (texto plano)
     page: int,
     x: float,   // px en la imagen de la página (origen arriba-izq)
     y: float,
@@ -1104,14 +1104,28 @@ export component AppWindow inherits Window {
                         // Solo activa en modo normal y borrar: si no, el
                         // TouchArea se come el arrastre del resaltado libre
                         // y el clic de la nota.
-                        for n in root.page-notes: Rectangle {
+                        for n in root.page-notes: nota := Rectangle {
                             x: n.x * 1px; y: n.y * 1px;
                             width: n.w * 1px; height: n.h * 1px;
-                            TouchArea {
+                            ta := TouchArea {
                                 enabled: root.tool-mode == 0 || root.tool-mode == 3;
                                 width: parent.width; height: parent.height;
-                                Tooltip { text: n.text; }
                                 clicked => { if (root.tool-mode == 3) { root.delete-note(n.idx); } }
+                            }
+                            // El comentario sale ENCIMA del resaltado. El
+                            // Tooltip nativo siempre sale abajo del puntero y
+                            // no se puede colocar: esto es un chip propio que
+                            // se mueve con la pagina.
+                            if (ta.has-hover): chip := Rectangle {
+                                x: 0px; y: -30px;
+                                width: min(300px, chip-txt.width + 12px);
+                                height: 26px;
+                                background: #1b1b1be8; border-radius: 4px;
+                                border-width: 1px; border-color: #ffffff40;
+                                chip-txt := Text {
+                                    x: 6px; y: (parent.height - self.height) / 2;
+                                    text: n.text; color: #ffffff; font-size: 12px;
+                                }
                             }
                         }
                         // goma elástica del resaltado libre (modo 2)
