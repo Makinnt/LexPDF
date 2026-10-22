@@ -68,11 +68,12 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   como al seleccionar texto en un PDF). **Por defecto es "selección de
   texto"**, y el panel te enseña el texto que has seleccionado de verdad
   («Seleccionado: …», **en negrita**), para que sepas qué vas a resaltar. El
-  comentario que escribas **se recuerda**: al elegir otro texto sigue ahí, para
-  que puedas reescribirlo en vez de teclearlo otra vez.
+  comentario se **borra** al elegir otro texto (la caja vuelve a su
+  «Escriba aquí el comentario...»).
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
-  visor. Al pasar el ratón por un resaltado o una nota sale un tooltip con su
-  comentario.
+  visor. Al pasar el ratón por encima de un **resaltado** o de una nota sale un
+  tooltip con su comentario (el resaltado entero es zona sensible, no solo el
+  trocito del marcador).
 - Todo eso vive en `{nombre}_anotado.pdf`; **el original no se toca nunca**.
 - Tema claro/oscuro (`PDF_DARK=1` para arrancar en oscuro).
 - Apertura directa por argumento: `cargo run -- doc.pdf`.

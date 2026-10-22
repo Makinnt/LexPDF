@@ -148,8 +148,14 @@ Flujos:
   sale nunca). El tooltip es una ventana emergente aparte: para verlo hay que
   capturar la pantalla entera, no la ventana de la app.
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
-  24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
-  de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
+  sensible con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms de retardo):
+  el **resaltado usa su rectángulo entero** (así el comentario sale al pasar por
+  encima del texto resaltado) y la **nota pegajosa una cajita 24×24** sobre su
+  marcador → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.
+  **GOTCHA**: el `TouchArea` de esas zonas solo está activo en modo normal y
+  borrar (`enabled: root.tool-mode == 0 || root.tool-mode == 3`): si está
+  activo siempre, se come el arrastre del resaltado libre y el clic de la nota.
+  (En Slint 1.18 no hay `MouseArea`.)
 - **Diálogo propio** (copia de trabajo / contraseña) **centrado con degradado**
   sobre el resto: `dlg-open/dlg-kind/dlg-msg/dlg-pass` + `dlg-answer(bool)`.
   Gotchas de Slint aprendidos aquí:

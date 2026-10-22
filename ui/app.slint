@@ -29,6 +29,8 @@ struct NoteRow {
     page: int,
     x: float,   // px en la imagen de la página (origen arriba-izq)
     y: float,
+    w: float,   // ancho de la zona de hover (el rectángulo del resaltado)
+    h: float,
     idx: int,   // índice en la lista (para borrar)
 }
 
@@ -1096,10 +1098,17 @@ export component AppWindow inherits Window {
                         // GOTCHA: el Tooltip va DENTRO del TouchArea: si cuelga del
                         // Rectangle, el hover lo tiene el TouchArea (el hijo) y el
                         // tooltip no sale nunca.
+                        // Zona sensible de cada nota: el resaltado usa su
+                        // rectángulo entero (el tooltip sale al pasar por
+                        // encima del texto), la nota pegajosa una cajita.
+                        // Solo activa en modo normal y borrar: si no, el
+                        // TouchArea se come el arrastre del resaltado libre
+                        // y el clic de la nota.
                         for n in root.page-notes: Rectangle {
-                            x: n.x * 1px - 8px; y: n.y * 1px - 8px;
-                            width: 24px; height: 24px;
+                            x: n.x * 1px; y: n.y * 1px;
+                            width: n.w * 1px; height: n.h * 1px;
                             TouchArea {
+                                enabled: root.tool-mode == 0 || root.tool-mode == 3;
                                 width: parent.width; height: parent.height;
                                 Tooltip { text: n.text; }
                                 clicked => { if (root.tool-mode == 3) { root.delete-note(n.idx); } }

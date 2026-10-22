@@ -1824,12 +1824,16 @@ fn push_page_notes(ui: &AppWindow, st: &State) {
         .enumerate()
         .filter(|(_, n)| n.page == page)
         .map(|(i, n)| {
-            let (x, y, _, _) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
+            let (x, y, w, h) = pdf_to_image(n.x0, n.y0, n.x1, n.y1, pw, ph, iw, ih);
+            // la nota pegajosa es un punto: cajita de 24x24 encima. El
+            // resaltado usa su rectángulo entero, para que el tooltip salga
+            // al pasar por encima del texto resaltado.
+            let (x, y, w, h) = if w < 4.0 || h < 4.0 { (x - 12.0, y - 12.0, 24.0, 24.0) } else { (x, y, w.max(24.0), h.max(12.0)) };
             let mut t: String = n.text.chars().take(200).collect();
             if n.text.chars().count() > 200 {
                 t.push('…');
             }
-            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y, idx: i as i32 }
+            NoteRow { text: StyledText::from_plain_text(&t), page: n.page as i32, x, y, w, h, idx: i as i32 }
         })
         .collect();
     ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
@@ -2100,6 +2104,7 @@ fn main() -> anyhow::Result<()> {
             ui.set_free_sel_text("".into());
             drop(s);
             ui.set_tool_mode(1);
+            ui.set_free_note_text("".into());
             ui.set_free_note_on(false);
             notify(&ui, &st, "Toca el punto del documento para la nota".into());
         });
@@ -2195,6 +2200,8 @@ fn main() -> anyhow::Result<()> {
                 sel
             };
             ui.set_free_sel_text(sel.into());
+            // el comentario anterior se borra: cada texto nuevo, comentario nuevo
+            ui.set_free_note_text("".into());
             ui.set_free_note_on(true);
             notify(&ui, &st, msg.into());
         });
