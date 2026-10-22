@@ -108,6 +108,8 @@ Flujos:
   desde la card del error (botón "Borrar", solo si tiene anotación).
   **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
   de la página, si no el scroll se come el arrastre del rectángulo.
+  El resaltado libre puede ser **por área** (el rectángulo) o **por palabras**
+  (`words_in_rect()`): cada palabra tocada es una anotación Highlight propia.
 - **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
   `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
   (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".
@@ -117,6 +119,13 @@ Flujos:
   dependencias, el texto completo (ficheros en `assets/licenses/`) y el repo
   (clicable → `xdg-open`/`open`/`cmd start`). `asset_file()` los busca junto al
   exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo.
+  **GOTCHA**: el texto de la licencia necesita un alto explícito
+  (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
+  el alto del contenido solo, el texto se sale de la ventana y no se desliza.
+- **GOTCHA `Tooltip`**: el `Tooltip` tiene que ir **dentro** del `TouchArea`
+  (si cuelga del `Rectangle` padre, el hover lo tiene el hijo y el tooltip no
+  sale nunca). El tooltip es una ventana emergente aparte: para verlo hay que
+  capturar la pantalla entera, no la ventana de la app.
 - Notas ya existentes: **no hay lista**. Cada nota de la página actual es una zona
   24×24 sobre su marcador con `Tooltip { text: ... }` (popup nativo de Slint, ~500 ms
   de retardo) → `show()` rellena `page-notes` con `pdf_to_image` y `note-total`.

@@ -37,7 +37,7 @@ struct State {
     working: Option<PathBuf>,            // copia de trabajo "{nombre}_anotado.pdf"
     settings: Settings,                  // ajustes del usuario (ventana aparte)
     err_anno: HashMap<usize, usize>,     // idx de all_errs -> idx de doc_notes (para borrar)
-    free_rect: Option<(u32, f32, f32, f32, f32)>, // resaltado libre pendiente: pág, x0,y0,x1,y1
+    free_rects: Option<(u32, Vec<[f32; 4]>)>, // resaltado libre pendiente: pág + rects
     password: Option<&'static str>,      // solo en memoria, nunca en disco
     dlg_pending: Option<Pending>,        // acción pendiente de un diálogo
     page: u32,
@@ -85,8 +85,8 @@ enum AnnotateReq {
     Highlight(Vec<usize>, String),
     /// Nota adhesiva libre (sticky note) en un punto.
     Note(u32, f32, f32, String),
-    /// Resaltado libre sobre un rectángulo (página, x0, y0, x1, y1).
-    HighlightRect(u32, f32, f32, f32, f32, String),
+    /// Resaltado libre sobre uno o varios rectángulos (página, rects, texto).
+    HighlightRects(u32, Vec<[f32; 4]>, String),
 }
 
 /// Tipo de anotación nativa del PDF.
@@ -964,11 +964,13 @@ struct Settings {
     copy_mode: u8,
     /// false = no se envía texto a ningún motor (sin revisión)
     motor: bool,
+    /// resaltado libre: 0 = por área (rectángulo), 1 = por palabras
+    free_sel: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { hl_color: 0, copy_mode: 0, motor: true }
+        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0 }
     }
 }
 
@@ -1038,6 +1040,14 @@ fn asset_file(name: &str) -> Option<PathBuf> {
     }
     cands.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/licenses").join(name));
     cands.into_iter().find(|c| c.is_file())
+}
+
+/// Alto estimado del texto de una licencia (px) a 11px de fuente en una
+/// columna de 520px. Puro y testeable.
+fn license_height(text: &str) -> i32 {
+    let chars = text.chars().count() as f32;
+    let lineas = text.lines().count() as f32;
+    (((chars / 90.0 + lineas) * 14.0) as i32 + 40).min(60000)
 }
 
 /// Texto completo de una licencia (varios ficheros = licencia dual).
@@ -1119,18 +1129,22 @@ fn open_licenses(lic: &Rc<RefCell<Option<LicensesWindow>>>) {
             w.set_cur_name(e.name.into());
             w.set_cur_lic(e.lic.into());
             w.set_cur_repo(e.repo.into());
-            w.set_cur_text(license_text(e.files).into());
+            let t = license_text(e.files);
+            w.set_cur_h(license_height(&t));
+            w.set_cur_text(t.into());
         });
         w.on_open_link(move |url| open_link(&url));
         *slot = Some(w);
     }
     if let Some(w) = slot.as_ref() {
         if let Some(e) = entries.first() {
+            let t = license_text(e.files);
             w.set_sel(0);
             w.set_cur_name(e.name.into());
             w.set_cur_lic(e.lic.into());
             w.set_cur_repo(e.repo.into());
-            w.set_cur_text(license_text(e.files).into());
+            w.set_cur_h(license_height(&t));
+            w.set_cur_text(t.into());
         }
         let _ = w.window().show();
     }
@@ -1398,6 +1412,17 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> Note
     }
 }
 
+/// Palabras de la página que toca el rectángulo (resaltado por texto).
+/// Puro y testeable.
+fn words_in_rect(words: &[Word], r: [f32; 4]) -> Vec<[f32; 4]> {
+    let (x0, y0, x1, y1) = (r[0], r[1], r[2], r[3]);
+    words
+        .iter()
+        .filter(|w| w.x0 < x1 && x0 < w.x1 && w.y0 < y1 && y0 < w.y1)
+        .map(|w| [w.x0, w.y0, w.x1, w.y1])
+        .collect()
+}
+
 /// Texto de la anotación a partir del hallazgo (o el que escribió el usuario).
 fn note_text(e: &Misspelling, text: &str) -> String {
     if text.trim().is_empty() {
@@ -1509,16 +1534,19 @@ fn annotate_open(st: &mut State, req: &AnnotateReq) -> anyhow::Result<Vec<DocNot
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 added.push(DocNote { page: *page, x0: *x, y0: *y, x1: *x, y1: *y, text: text.clone(), kind: AnnoKind::Note });
             }
-            // resaltado libre sobre un rectángulo
-            AnnotateReq::HighlightRect(page, x0, y0, x1, y1, text) => {
+            // resaltado libre sobre uno o varios rectángulos (área o palabras)
+            AnnotateReq::HighlightRects(page, rects, text) => {
                 anyhow::ensure!(!text.trim().is_empty(), "escribe el comentario primero");
+                anyhow::ensure!(!rects.is_empty(), "no hay nada que resaltar");
                 let mut pg = pages.get(*page as u16).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                let mut ann = pg.annotations_mut().create_highlight_annotation().map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                ann.set_bounds(PdfRect::new_from_values(*y0, *x0, *y1, *x1)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                ann.set_stroke_color(hl_color(color_mode, "")).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                ann.set_contents(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                hl_rects.push((*page, [*x0, *y0, *x1, *y1]));
-                added.push(DocNote { page: *page, x0: *x0, y0: *y0, x1: *x1, y1: *y1, text: text.clone(), kind: AnnoKind::Highlight });
+                for r in rects {
+                    let mut ann = pg.annotations_mut().create_highlight_annotation().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    ann.set_bounds(PdfRect::new_from_values(r[1], r[0], r[3], r[2])).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    ann.set_stroke_color(hl_color(color_mode, "")).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    ann.set_contents(text).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                    hl_rects.push((*page, *r));
+                    added.push(DocNote { page: *page, x0: r[0], y0: r[1], x1: r[2], y1: r[3], text: text.clone(), kind: AnnoKind::Highlight });
+                }
             }
         }
     }
@@ -1752,7 +1780,7 @@ fn main() -> anyhow::Result<()> {
         working: None,
         settings: load_settings(),
         err_anno: HashMap::new(),
-        free_rect: None,
+        free_rects: None,
         password: None,
         dlg_pending: None,
         page: 0,
@@ -1953,7 +1981,7 @@ fn main() -> anyhow::Result<()> {
             }
             let mut s = st.borrow_mut();
             s.free_pt = None; // armado: el toque en el doc fija el punto
-            s.free_rect = None;
+            s.free_rects = None;
             drop(s);
             ui.set_tool_mode(1);
             ui.set_free_note_text("".into());
@@ -1998,6 +2026,8 @@ fn main() -> anyhow::Result<()> {
             }
             let (pw, ph, iw, ih) = (s.page_w, s.page_h, s.img_w as f32, s.img_h as f32);
             let pg = s.page;
+            let por_palabras = s.settings.free_sel == 1;
+            let words = s.words.clone();
             drop(s);
             // px de imagen → puntos PDF (y invertido)
             let (ax, ay, bx, by) = px_rect_to_pdf(x0, y0, x1, y1, pw, ph, iw, ih);
@@ -2005,9 +2035,23 @@ fn main() -> anyhow::Result<()> {
                 notify(&ui, &st, "Arrastra un rectángulo (no un clic)".into());
                 return;
             }
-            st.borrow_mut().free_rect = Some((pg, ax, ay, bx, by));
+            // por palabras: se resaltan las que toque el rectángulo (como al
+            // seleccionar texto en un PDF). Si no pilla ninguna, el área tal cual.
+            let (rects, msg): (Vec<[f32; 4]>, String) = if por_palabras {
+                let hits = words_in_rect(&words, [ax, ay, bx, by]);
+                if hits.is_empty() {
+                    (vec![[ax, ay, bx, by]], "Ahí no hay texto: se resalta el área".to_string())
+                } else {
+                    let n = hits.len();
+                    let p = if n == 1 { "palabra" } else { "palabras" };
+                    (hits, format!("{n} {p} marcada{}: escribe el comentario y guarda", if n == 1 { "" } else { "s" }))
+                }
+            } else {
+                (vec![[ax, ay, bx, by]], "Zona marcada: escribe el comentario y guarda".to_string())
+            };
+            st.borrow_mut().free_rects = Some((pg, rects.clone()));
             ui.set_free_note_on(true);
-            notify(&ui, &st, "Zona marcada: escribe el comentario y guarda".into());
+            notify(&ui, &st, msg.into());
         });
     }
     {
@@ -2018,10 +2062,10 @@ fn main() -> anyhow::Result<()> {
             let text = ui.get_free_note_text().to_string();
             let mode = ui.get_tool_mode();
             let pt = st.borrow().free_pt;
-            let rect = st.borrow().free_rect;
+            let rects = st.borrow().free_rects.clone();
             let res = if mode == 2 {
-                match rect {
-                    Some((pg, x0, y0, x1, y1)) => apply_note(&ui, &st, AnnotateReq::HighlightRect(pg, x0, y0, x1, y1, text)),
+                match rects {
+                    Some((pg, rs)) => apply_note(&ui, &st, AnnotateReq::HighlightRects(pg, rs, text)),
                     None => {
                         notify(&ui, &st, "Arrastra un rectángulo sobre el documento primero".into());
                         NoteResult::Failed
@@ -2043,7 +2087,7 @@ fn main() -> anyhow::Result<()> {
                 ui.set_tool_mode(0);
                 let mut s = st.borrow_mut();
                 s.free_pt = None;
-                s.free_rect = None;
+                s.free_rects = None;
             }
         });
     }
@@ -2057,7 +2101,7 @@ fn main() -> anyhow::Result<()> {
             }
             let mut s = st.borrow_mut();
             s.free_pt = None;
-            s.free_rect = None;
+            s.free_rects = None;
         });
     }
     {
@@ -2076,7 +2120,7 @@ fn main() -> anyhow::Result<()> {
             {
                 let mut s = st.borrow_mut();
                 s.free_pt = None;
-                s.free_rect = None;
+                s.free_rects = None;
             }
             notify(&ui, &st, "Arrastra sobre el texto que quieras resaltar".into());
         });
@@ -2189,14 +2233,15 @@ fn main() -> anyhow::Result<()> {
                         w.set_hl_color(s.hl_color as i32);
                         w.set_copy_mode(s.copy_mode as i32);
                         w.set_motor_on(s.motor);
+                        w.set_free_sel(s.free_sel as i32);
                         let a3 = about2.clone();
                         let l3 = lic2.clone();
                         w.on_open_about(move || open_about(&a3, &l3));
                         let st2 = st.clone();
                         let ui2 = ui_weak.clone();
-                        w.on_apply(move |hl, copy, motor| {
+                        w.on_apply(move |hl, copy, motor, fsel| {
                             let Some(ui) = ui2.upgrade() else { return };
-                            let s2 = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor };
+                            let s2 = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor, free_sel: fsel as u8 };
                             save_settings(&s2);
                             {
                                 let mut stt = st2.borrow_mut();
@@ -2220,28 +2265,11 @@ fn main() -> anyhow::Result<()> {
                 w.set_hl_color(s.hl_color as i32);
                 w.set_copy_mode(s.copy_mode as i32);
                 w.set_motor_on(s.motor);
+                w.set_free_sel(s.free_sel as i32);
             }
             if let Some(w) = slot.as_ref() {
                 let _ = w.window().show();
             }
-        });
-    }
-    {
-        let ui_weak = ui.as_weak();
-        let st = st.clone();
-        ui.on_settings_apply(move |hl, copy, motor| {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let s = Settings { hl_color: hl as u8, copy_mode: copy as u8, motor };
-            save_settings(&s);
-            {
-                let mut stt = st.borrow_mut();
-                stt.settings = s;
-                stt.lt_dead = !s.motor;
-            }
-            ui.set_set_hl_color(hl);
-            ui.set_set_copy_mode(copy);
-            ui.set_set_motor(motor);
-            notify(&ui, &st, "Ajustes guardados".into());
         });
     }
 
@@ -2496,7 +2524,7 @@ fn main() -> anyhow::Result<()> {
                         ui.set_tool_mode(0);
                         let mut s = st.borrow_mut();
                         s.free_pt = None;
-                        s.free_rect = None;
+                        s.free_rects = None;
                     }
                 }
                 None => {}
@@ -2837,7 +2865,7 @@ mod tests {
             pdfium: load_pdfium(),
             doc: None, doc_from: None, doc_stamp: None,
             path: Some(path), working: None, password: None, dlg_pending: None,
-            settings: Settings::default(), err_anno: HashMap::new(), free_rect: None,
+            settings: Settings::default(), err_anno: HashMap::new(), free_rects: None,
             page: 0, total: 3,
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![Misspelling { word: "herror".into(), sug: vec!["error".into()], page: 0, x0: 72.0, y0: 700.0, x1: 130.0, y1: 712.0, dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into() }],
@@ -2959,6 +2987,65 @@ mod tests {
         let (a, b, c, d) = px_rect_to_pdf(300.0, 400.0, 100.0, 200.0, 612.0, 792.0, 1224.0, 1584.0);
         assert!((a - x0).abs() < 0.01 && (b - y0).abs() < 0.01);
         assert!((c - x1).abs() < 0.01 && (d - y1).abs() < 0.01);
+    }
+
+    /// Las palabras que toca el rectángulo se resaltan (como al seleccionar
+    /// texto en un PDF); las de fuera, no.
+    #[test]
+    fn el_resaltado_por_palabras_solo_coge_las_que_toca() {
+        let w = vec![
+            Word { text: "uno".into(), x0: 10.0, y0: 100.0, x1: 40.0, y1: 110.0 },
+            Word { text: "dos".into(), x0: 50.0, y0: 100.0, x1: 80.0, y1: 110.0 },
+            Word { text: "tres".into(), x0: 90.0, y0: 100.0, x1: 120.0, y1: 110.0 },
+            Word { text: "abajo".into(), x0: 10.0, y0: 50.0, x1: 40.0, y1: 60.0 },
+        ];
+        // un rectángulo que pilla "uno" y "dos"
+        let hits = words_in_rect(&w, [5.0, 95.0, 85.0, 115.0]);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0][0], 10.0);
+        assert_eq!(hits[1][2], 80.0);
+        // uno que solo pilla "dos"
+        assert_eq!(words_in_rect(&w, [45.0, 95.0, 85.0, 115.0]).len(), 1);
+        // uno que no pilla nada
+        assert!(words_in_rect(&w, [200.0, 200.0, 300.0, 300.0]).is_empty());
+    }
+
+    /// El alto del texto de la licencia se estima para que el Flickable
+    /// pueda desplazar (si no, el texto se sale de la ventana).
+    #[test]
+    fn el_alto_de_la_licencia_crece_con_el_texto() {
+        let corto = license_height("una linea\n");
+        let largo = license_text(&["GPL-3.txt"]);
+        assert!(license_height(&largo) > corto * 10, "el texto largo debe más alto");
+        assert!(license_height(&largo) < 60000);
+    }
+
+    /// Los ajustes se leen del JSON (con el campo nuevo incluido).
+    #[test]
+    fn los_ajustes_se_leen_del_json() {
+        let s: Settings =
+            serde_json::from_str(r#"{"hl_color":1,"copy_mode":2,"motor":false,"free_sel":1}"#).unwrap();
+        assert_eq!(s.hl_color, 1);
+        assert_eq!(s.copy_mode, 2);
+        assert!(!s.motor);
+        assert_eq!(s.free_sel, 1);
+    }
+
+    /// El texto de cada licencia debe ser el de verdad (y no el de otra).
+    #[test]
+    fn los_textos_de_licencia_son_los_correctos() {
+        let gpl = license_text(&["GPL-3.txt"]);
+        assert!(gpl.contains("GNU GENERAL PUBLIC LICENSE"), "no es la GPL:\n{}", &gpl[..gpl.len().min(120)]);
+        let apache = license_text(&["Apache-2.0.txt"]);
+        assert!(apache.contains("Apache License"), "no es la Apache");
+        let lgpl = license_text(&["LGPL-2.1.txt"]);
+        assert!(lgpl.contains("GNU LESSER GENERAL PUBLIC LICENSE"), "no es la LGPL");
+        let mit = license_text(&["MIT.txt"]);
+        assert!(mit.contains("MIT License"), "no es la MIT");
+        // la primera entrada de la lista es la app: GPL
+        let entries = license_entries();
+        let e = entries.first().unwrap();
+        assert!(license_text(e.files).contains("GNU GENERAL PUBLIC LICENSE"));
     }
 
     #[test]

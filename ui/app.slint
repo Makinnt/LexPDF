@@ -40,11 +40,14 @@ component MiniBtn inherits Rectangle {
     in property <string> label;
     in property <color> bg: #eee;
     in property <color> fg: #222;
+    in property <color> bd: transparent;   // borde (en oscuro se ve mejor)
     callback clicked;
     height: 22px;
     horizontal-stretch: 1;
     background: bg;
     border-radius: 4px;
+    border-width: 1px;
+    border-color: bd;
     Text {
         text: label; color: fg; font-size: 11px;
         // Text es @implicit_size: sin width/height explicitos el texto se pega
@@ -64,6 +67,7 @@ component DropSel inherits Rectangle {
     in-out property <int> current: 0;
     in property <color> bg: #eee;
     in property <color> fg: #222;
+    in property <color> bd: transparent;   // borde (en oscuro se ve mejor)
     in property <color> hl: #222;
     in property <color> hl-fg: white;
     callback picked(int);
@@ -74,6 +78,7 @@ component DropSel inherits Rectangle {
         Rectangle {
             height: 26px;
             background: bg; border-radius: 4px;
+            border-width: 1px; border-color: bd;
             HorizontalLayout {
                 padding-left: 8px; padding-right: 8px; spacing: 6px;
                 Text {
@@ -106,13 +111,14 @@ component DropSel inherits Rectangle {
 export component SettingsWindow inherits Window {
     title: "Ajustes · LexPDF";
     width: 520px;
-    height: 680px;
+    height: 780px;
     background: #1e1e1e;
 
     in-out property <int> hl-color: 0;    // 0 = por gravedad, 1 = amarillo
     in-out property <int> copy-mode: 0;   // 0 = preguntar, 1 = siempre, 2 = nunca
     in-out property <bool> motor-on: true;
-    callback apply(int, int, bool);
+    in-out property <int> free-sel: 0;    // 0 = área, 1 = palabras
+    callback apply(int, int, bool, int);
     callback open-about();
 
     VerticalLayout {
@@ -154,6 +160,43 @@ export component SettingsWindow inherits Window {
                         horizontal-alignment: center; vertical-alignment: center;
                     }
                     TouchArea { width: parent.width; height: parent.height; clicked => { root.hl-color = 1; } }
+                }
+            }
+        }
+
+        // --- resaltado libre: área o palabras
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Resaltar texto libre"; font-size: 14px; font-weight: 700; color: #e8e8e8; }
+            Text {
+                text: "Área: se resalta el rectángulo tal cual. Palabras: se resaltan las palabras que toque el rectángulo, como al seleccionar texto en un PDF.";
+                font-size: 12px; color: #aaa; wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.free-sel == 0 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Por área"; font-size: 13px;
+                        color: root.free-sel == 0 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.free-sel = 0; } }
+                }
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.free-sel == 1 ? #e8e8e8 : #333;
+                    border-width: 1px; border-color: #555;
+                    Text {
+                        text: "Por palabras"; font-size: 13px;
+                        color: root.free-sel == 1 ? #111 : #e8e8e8;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.free-sel = 1; } }
                 }
             }
         }
@@ -267,7 +310,7 @@ export component SettingsWindow inherits Window {
                 }
                 TouchArea {
                     width: parent.width; height: parent.height;
-                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on); }
+                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on, root.free-sel); }
                 }
             }
         }
@@ -323,7 +366,7 @@ export component AboutWindow inherits Window {
             spacing: 8px;
             alignment: end;
             Rectangle {
-                height: 30px; border-radius: 4px;
+                width: 104px; height: 30px; border-radius: 4px;
                 background: #2d2d2d; border-width: 1px; border-color: #444;
                 Text {
                     text: "Licencias"; font-size: 13px; color: #e8e8e8;
@@ -336,7 +379,7 @@ export component AboutWindow inherits Window {
                 }
             }
             Rectangle {
-                height: 30px; border-radius: 4px;
+                width: 78px; height: 30px; border-radius: 4px;
                 background: #e8e8e8;
                 Text {
                     text: "Cerrar"; font-size: 13px; color: #111;
@@ -365,6 +408,7 @@ export component LicensesWindow inherits Window {
     in-out property <string> cur-lic: "";
     in-out property <string> cur-repo: "";
     in-out property <string> cur-text: "";
+    in-out property <int> cur-h: 400;   // alto del texto (lo calcula Rust)
     callback select(int);
     callback open-link(string);
 
@@ -392,17 +436,25 @@ export component LicensesWindow inherits Window {
 
         Rectangle { width: 1px; background: #3d3d3d; }
 
-        VerticalLayout {
-            spacing: 6px;
+        // panel derecho con posiciones absolutas: el Flickable del texto
+        // necesita una altura propia (si no, toma el alto del texto y no
+        // hay nada que deslizar)
+        Rectangle {
             horizontal-stretch: 1;
-            Text { text: root.cur-name; font-size: 16px; font-weight: 700; color: #e8e8e8; }
-            Text { text: root.cur-lic; font-size: 12px; color: #aaa; }
+            Text {
+                x: 0; y: 0; width: parent.width; height: 24px;
+                text: root.cur-name; font-size: 16px; font-weight: 700; color: #e8e8e8;
+            }
+            Text {
+                x: 0; y: 26px; width: parent.width; height: 18px;
+                text: root.cur-lic; font-size: 12px; color: #aaa;
+            }
             Rectangle {
-                height: 26px; border-radius: 4px;
-                background: #262626; border-width: 1px; border-color: #444;
+                x: 0; y: 48px; width: parent.width; height: 26px;
+                background: #262626; border-radius: 4px; border-width: 1px; border-color: #444;
                 Text {
-                    text: root.cur-repo; font-size: 12px; color: #7fb3ff;
                     x: 8px; width: parent.width - 16px; height: parent.height;
+                    text: root.cur-repo; font-size: 12px; color: #7fb3ff;
                     vertical-alignment: center; overflow: elide;
                 }
                 TouchArea {
@@ -411,10 +463,16 @@ export component LicensesWindow inherits Window {
                 }
             }
             Flickable {
-                vertical-stretch: 1;
+                x: 0; y: 84px;
+                width: parent.width;
+                height: parent.height - 84px;
+                max-height: parent.height - 84px;
+                content-width: 540px;
+                content-height: root.cur-h * 1px;
                 Text {
                     text: root.cur-text;
-                    width: 540px;
+                    width: 520px;
+                    height: root.cur-h * 1px;
                     wrap: word-wrap;
                     font-size: 11px; color: #bbb;
                 }
@@ -514,7 +572,6 @@ export component AppWindow inherits Window {
     callback highlight-new();
     callback delete-mode();
     callback delete-note(int);
-    callback settings-apply(int, int, bool);
     // valores guardados (el panel de ajustes los carga al abrirse)
     in-out property <int> set-hl-color: 0;
     in-out property <int> set-copy-mode: 0;
@@ -528,6 +585,8 @@ export component AppWindow inherits Window {
     property <color> c-card: root.is-dark ? #2d2d2d : white;
     property <color> c-view: root.is-dark ? #141414 : #e9e9e9;
     property <color> c-pill: root.is-dark ? #333 : #eee;
+    property <color> c-input: root.is-dark ? #1a1a1a : white;
+    property <color> c-input-line: root.is-dark ? #6a6a6a : #ddd;
     property <color> c-accent: root.is-dark ? #e8e8e8 : #222;
     property <color> c-accent-fg: root.is-dark ? #111 : white;
 
@@ -672,7 +731,7 @@ export component AppWindow inherits Window {
                         label: "Tipo";
                         opts: ["Todas", "Ortografía", "Sintaxis"];
                         current <=> root.type-filter;
-                        bg: root.c-pill; fg: root.c-fg;
+                        bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                         hl: root.c-accent; hl-fg: root.c-accent-fg;
                         horizontal-stretch: 1;
                         picked(i) => { root.type-set(i); }
@@ -681,7 +740,7 @@ export component AppWindow inherits Window {
                         label: "Gravedad";
                         opts: ["Todas", "Grave", "Intermedia", "Mínima"];
                         current <=> root.sev-filter;
-                        bg: root.c-pill; fg: root.c-fg;
+                        bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                         hl: root.c-accent; hl-fg: root.c-accent-fg;
                         horizontal-stretch: 1;
                         picked(i) => { root.sev-set(i); }
@@ -721,22 +780,22 @@ export component AppWindow inherits Window {
                                         spacing: 4px;
                                         MiniBtn {
                                             label: e.dimmed ? "Restaurar" : "Omitir";
-                                            bg: root.c-pill; fg: root.c-fg;
+                                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.omit-clicked(i); }
                                         }
                                         MiniBtn {
                                             label: "Comentar";
-                                            bg: root.c-pill; fg: root.c-fg;
+                                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.note-clicked(i); }
                                         }
                                         MiniBtn {
                                             label: "Obs. gramatical";
-                                            bg: root.c-pill; fg: root.c-fg;
+                                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
                                         }
                                         MiniBtn {
                                             label: "Borrar";
-                                            bg: root.c-pill; fg: root.c-fg;
+                                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             visible: e.has_anno;
                                             clicked => { root.delete-anno(i); }
                                         }
@@ -746,7 +805,7 @@ export component AppWindow inherits Window {
                                         visible: e.count >= 5;
                                         MiniBtn {
                                             label: e.is-group ? "Desagrupar (×" + e.count + ")" : "Agrupar (×" + e.count + ")";
-                                            bg: root.c-pill; fg: root.c-fg;
+                                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.group-toggle(i); }
                                         }
                                     }
@@ -755,7 +814,8 @@ export component AppWindow inherits Window {
                                         visible: root.selected-note == i;
                                         Rectangle {
                                             height: 30px;
-                                            background: root.c-pill; border-radius: 4px;
+                                            background: root.c-input; border-radius: 4px;
+                                            border-width: 1px; border-color: root.c-input-line;
                                             TextInput {
                                                 x: 8px; width: parent.width - 16px; height: parent.height;
                                                 text <=> root.note-text;
@@ -768,7 +828,7 @@ export component AppWindow inherits Window {
                                         }
                                         MiniBtn {
                                             label: "Guardar";
-                                            bg: root.c-accent; fg: root.c-accent-fg;
+                                            bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.save-note(i); }
                                         }
                                     }
@@ -945,12 +1005,15 @@ export component AppWindow inherits Window {
                         }
                         // notas nativas: zona sensible sobre el marcador -> tooltip al pasar el ratón.
                         // va ANTES del pg-touch: en modo nota el TouchArea de arriba se come el hover.
+                        // GOTCHA: el Tooltip va DENTRO del TouchArea: si cuelga del
+                        // Rectangle, el hover lo tiene el TouchArea (el hijo) y el
+                        // tooltip no sale nunca.
                         for n in root.page-notes: Rectangle {
                             x: n.x * 1px - 8px; y: n.y * 1px - 8px;
                             width: 24px; height: 24px;
-                            Tooltip { text: n.text; }
                             TouchArea {
                                 width: parent.width; height: parent.height;
+                                Tooltip { text: n.text; }
                                 clicked => { if (root.tool-mode == 3) { root.delete-note(n.idx); } }
                             }
                         }
@@ -1001,8 +1064,8 @@ export component AppWindow inherits Window {
                     }
                     Rectangle {
                         height: 30px;
-                        background: root.c-card; border-radius: 4px;
-                        border-width: 1px; border-color: root.c-line;
+                        background: root.c-input; border-radius: 4px;
+                        border-width: 1px; border-color: root.c-input-line;
                         TextInput {
                             x: 8px; width: parent.width - 16px; height: parent.height;
                             text <=> root.free-note-text;
@@ -1015,12 +1078,12 @@ export component AppWindow inherits Window {
                         spacing: 4px;
                         MiniBtn {
                             label: root.tool-mode == 2 ? "Guardar resaltado" : "Guardar nota";
-                            bg: root.c-accent; fg: root.c-accent-fg;
+                            bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.free-note-save(); }
                         }
                         MiniBtn {
                             label: "Cancelar";
-                            bg: root.c-pill; fg: root.c-fg;
+                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.free-note-cancel(); }
                         }
                     }
@@ -1093,12 +1156,12 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         MiniBtn {
                             label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
-                            bg: root.c-pill; fg: root.c-fg;
+                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(false); }
                         }
                         MiniBtn {
                             label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
-                            bg: root.c-accent; fg: root.c-accent-fg;
+                            bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(true); }
                         }
                     }

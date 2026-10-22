@@ -62,8 +62,11 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   propia card o con el 🗑 de la barra.
 - **Resaltar texto libre**: el botón 🖌 de la barra, arrastras el rectángulo sobre
   el texto y sale un comentario. Sale en amarillo (el color de un rotulador).
+  En Ajustes puedes elegir **por área** (el rectángulo tal cual) o **por palabras**
+  (se resaltan las palabras que toque, como al seleccionar texto en un PDF).
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
-  visor. Al pasar el ratón por un marcador sale un tooltip con su texto.
+  visor. Al pasar el ratón por un resaltado o una nota sale un tooltip con su
+  comentario.
 - Todo eso vive en `{nombre}_anotado.pdf`; **el original no se toca nunca**.
 - Tema claro/oscuro (`PDF_DARK=1` para arrancar en oscuro).
 - Apertura directa por argumento: `cargo run -- doc.pdf`.
@@ -188,13 +191,14 @@ El botón ⚙ de la barra abre una ventana aparte con:
 
 - **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o
   amarillo único. El texto libre siempre va en amarillo.
+- **Resaltar texto libre**: por área o por palabras (ver arriba).
 - **Copia de trabajo**: preguntar al abrir / crearla siempre / nunca. Ahí van a parar
   las notas y los resaltados.
 - **Motor de revisión**: activado (el texto se revisa en local) o desactivado (no se
   envía ni una palabra a ningún proceso).
 - **Acerca de**: el logo, el nombre de la app y un botón con las **licencias
   enteras** de cada dependencia (Slint, PDFium, LanguageTool, lopdf, los iconos…)
-  y el enlace a su repositorio.
+  y el enlace a su repositorio. El texto de la licencia se desliza con la rueda.
 
 Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 
