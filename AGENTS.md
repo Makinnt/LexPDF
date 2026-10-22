@@ -113,7 +113,13 @@ Flujos:
   recuadro (`words_in_rect()`, una anotación por palabra) · 1 = selección real
   de texto (`words_in_lines()`, una anotación continua por línea). El ajuste
   nuevo es `free_text` en `settings.json` (con `#[serde(default)]` para que los
-  ficheros de ajustes viejos sigan leyéndose).
+  ficheros de ajustes viejos sigan leyéndose). Por defecto `free_text=1`
+  (selección de texto). El panel muestra el texto seleccionado de verdad
+  (`text_in_rect()`, una línea, se corta a 80 caracteres).
+  **GOTCHA layout**: un `Text` con `wrap` y **alto implícito** dentro del
+  `VerticalLayout` del panel hace que el layout reparta el espacio y el panel
+  se descuadre (el input y los botones acaban fuera de la ventana): hay que
+  darle `height:` explícito.
 - **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
   `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
   (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".

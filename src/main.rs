@@ -977,7 +977,7 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0, free_text: 0 }
+        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0, free_text: 1 }
     }
 }
 
@@ -1439,6 +1439,19 @@ fn words_in_rect(words: &[Word], r: [f32; 4]) -> Vec<[f32; 4]> {
         .filter(|w| w.x0 < x1 && x0 < w.x1 && w.y0 < y1 && y0 < w.y1)
         .map(|w| [w.x0, w.y0, w.x1, w.y1])
         .collect()
+}
+
+/// Texto de las palabras que caen dentro del rectángulo, en orden de lectura
+/// (línea por línea, de izquierda a derecha): lo que el usuario ha selecciónado
+/// de verdad. Puro y testeable.
+fn text_in_rect(words: &[Word], r: [f32; 4]) -> String {
+    let (x0, y0, x1, y1) = (r[0], r[1], r[2], r[3]);
+    let mut hits: Vec<&Word> = words
+        .iter()
+        .filter(|w| w.x0 < x1 && x0 < w.x1 && w.y0 < y1 && y0 < w.y1)
+        .collect();
+    hits.sort_by(|a, b| b.y1.total_cmp(&a.y1).then(a.x0.total_cmp(&b.x0)));
+    hits.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")
 }
 
 /// Palabras del rectángulo agrupadas por línea: cada línea sale como un
@@ -2084,6 +2097,7 @@ fn main() -> anyhow::Result<()> {
             let mut s = st.borrow_mut();
             s.free_pt = None; // armado: el toque en el doc fija el punto
             s.free_rects = None;
+            ui.set_free_sel_text("".into());
             drop(s);
             ui.set_tool_mode(1);
             ui.set_free_note_text("".into());
@@ -2171,6 +2185,17 @@ fn main() -> anyhow::Result<()> {
                 (vec![[ax, ay, bx, by]], "Zona marcada: escribe el comentario y guarda".to_string())
             };
             st.borrow_mut().free_rects = Some((pg, rects.clone()));
+            // el texto de verdad que se ha seleccionado (vacío si el área
+            // no pilla palabras). Se corta: el panel solo enseña una línea.
+            let sel = text_in_rect(&words, [ax, ay, bx, by]);
+            let sel = if sel.chars().count() > 80 {
+                let mut t: String = sel.chars().take(79).collect();
+                t.push('…');
+                t
+            } else {
+                sel
+            };
+            ui.set_free_sel_text(sel.into());
             ui.set_free_note_on(true);
             notify(&ui, &st, msg.into());
         });
@@ -2206,6 +2231,7 @@ fn main() -> anyhow::Result<()> {
             if res == NoteResult::Saved {
                 ui.set_free_note_on(false);
                 ui.set_tool_mode(0);
+                ui.set_free_sel_text("".into());
                 let mut s = st.borrow_mut();
                 s.free_pt = None;
                 s.free_rects = None;
@@ -2219,6 +2245,7 @@ fn main() -> anyhow::Result<()> {
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_free_note_on(false);
                 ui.set_tool_mode(0);
+                ui.set_free_sel_text("".into());
             }
             let mut s = st.borrow_mut();
             s.free_pt = None;
@@ -2234,10 +2261,12 @@ fn main() -> anyhow::Result<()> {
             if ui.get_tool_mode() == 2 {
                 ui.set_tool_mode(0);
                 ui.set_free_note_on(false);
+                ui.set_free_sel_text("".into());
                 return;
             }
             ui.set_tool_mode(2);
             ui.set_free_note_on(false);
+            ui.set_free_sel_text("".into());
             {
                 let mut s = st.borrow_mut();
                 s.free_pt = None;
@@ -3195,6 +3224,20 @@ mod tests {
         assert!(license_height(&largo) < 60000);
     }
 
+    /// El texto seleccionado sale en orden de lectura (línea por línea).
+    #[test]
+    fn el_texto_seleccionado_sale_en_orden() {
+        let w = vec![
+            Word { text: "uno".into(), x0: 10.0, y0: 100.0, x1: 40.0, y1: 110.0 },
+            Word { text: "dos".into(), x0: 50.0, y0: 100.0, x1: 80.0, y1: 110.0 },
+            Word { text: "tres".into(), x0: 10.0, y0: 50.0, x1: 40.0, y1: 60.0 },
+            Word { text: "fuera".into(), x0: 300.0, y0: 50.0, x1: 340.0, y1: 60.0 },
+        ];
+        // la línea de arriba va primero, y dentro de la línea de izquierda a derecha
+        assert_eq!(text_in_rect(&w, [5.0, 40.0, 90.0, 115.0]), "uno dos tres");
+        assert_eq!(text_in_rect(&w, [200.0, 200.0, 300.0, 300.0]), "");
+    }
+
     /// Los ajustes se leen del JSON (con el campo nuevo incluido).
     #[test]
     fn los_ajustes_se_leen_del_json() {
@@ -3208,7 +3251,9 @@ mod tests {
         // un fichero de ajustes viejo (sin el campo nuevo) se sigue leyendo
         let viejo: Settings =
             serde_json::from_str(r#"{"hl_color":0,"copy_mode":0,"motor":true,"free_sel":0}"#).unwrap();
-        assert_eq!(viejo.free_text, 0);
+        assert_eq!(viejo.free_text, Settings::default().free_text);
+        // por defecto: selección de texto (no por recuadro)
+        assert_eq!(Settings::default().free_text, 1);
     }
 
     /// El texto de cada licencia debe ser el de verdad (y no el de otra).

@@ -65,7 +65,9 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   En Ajustes puedes elegir **por área** (el rectángulo tal cual) o **por texto**.
   Con "por texto" sale una opción más: **por recuadro** (cada palabra en su
   propia caja) o **selección de texto** (una sola banda continua por línea,
-  como al seleccionar texto en un PDF).
+  como al seleccionar texto en un PDF). **Por defecto es "selección de
+  texto"**, y el panel te enseña el texto que has seleccionado de verdad
+  («Seleccionado: …»), para que sepas qué vas a resaltar.
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
   visor. Al pasar el ratón por un resaltado o una nota sale un tooltip con su
   comentario.
