@@ -67,7 +67,9 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
   propia caja) o **selección de texto** (una sola banda continua por línea,
   como al seleccionar texto en un PDF). **Por defecto es "selección de
   texto"**, y el panel te enseña el texto que has seleccionado de verdad
-  («Seleccionado: …»), para que sepas qué vas a resaltar.
+  («Seleccionado: …», **en negrita**), para que sepas qué vas a resaltar. El
+  comentario que escribas **se recuerda**: al elegir otro texto sigue ahí, para
+  que puedas reescribirlo en vez de teclearlo otra vez.
 - **Notas adhesivas** (sticky) para lo que no es un error, en cualquier punto del
   visor. Al pasar el ratón por un resaltado o una nota sale un tooltip con su
   comentario.

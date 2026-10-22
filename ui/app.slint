@@ -1149,10 +1149,15 @@ export component AppWindow inherits Window {
                     // Text con alto FIJO: con wrap y alto implícito el layout
                     // reparte el espacio y el panel se descuadra
                     Text {
-                        text: (root.tool-mode == 2 ? "Escribe el comentario del resaltado y guarda." : "Toca el punto del documento, escribe y guarda.")
-                            + (root.free-sel-text != "" ? "\nSeleccionado: «" + root.free-sel-text + "»" : "");
+                        text: root.tool-mode == 2 ? "Escribe el comentario del resaltado y guarda." : "Toca el punto del documento, escribe y guarda.";
                         font-size: 12px; color: root.c-dim; wrap: word-wrap;
-                        height: 34px;
+                        height: 16px;
+                    }
+                    // el texto seleccionado, en negrita para que se vea claro
+                    if (root.free-sel-text != ""): Text {
+                        text: "Seleccionado: «" + root.free-sel-text + "»";
+                        font-size: 12px; font-weight: 700; color: root.c-fg; wrap: word-wrap;
+                        height: 16px;
                     }
                     Rectangle {
                         height: 30px;
@@ -1162,7 +1167,7 @@ export component AppWindow inherits Window {
                         Text {
                             x: 8px; width: parent.width - 16px; height: parent.height;
                             text: root.tool-mode == 2 ? "Escriba aquí el comentario..." : "Escriba aquí la nota...";
-                            font-size: 13px; color: root.c-dim;
+                            font-size: 13px; color: root.c-fg;
                             vertical-alignment: center;
                             visible: root.free-note-text == "";
                         }

@@ -2100,7 +2100,6 @@ fn main() -> anyhow::Result<()> {
             ui.set_free_sel_text("".into());
             drop(s);
             ui.set_tool_mode(1);
-            ui.set_free_note_text("".into());
             ui.set_free_note_on(false);
             notify(&ui, &st, "Toca el punto del documento para la nota".into());
         });

@@ -115,7 +115,9 @@ Flujos:
   nuevo es `free_text` en `settings.json` (con `#[serde(default)]` para que los
   ficheros de ajustes viejos sigan leyéndose). Por defecto `free_text=1`
   (selección de texto). El panel muestra el texto seleccionado de verdad
-  (`text_in_rect()`, una línea, se corta a 80 caracteres).
+  (`text_in_rect()`, una línea, se corta a 80 caracteres). El texto del
+  comentario se recuerda: `free-note-text` no se borra al empezar otra
+  selección (solo al abrir la app).
   **GOTCHA layout**: un `Text` con `wrap` y **alto implícito** dentro del
   `VerticalLayout` del panel hace que el layout reparta el espacio y el panel
   se descuadre (el input y los botones acaban fuera de la ventana): hay que
