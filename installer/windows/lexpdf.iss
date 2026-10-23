@@ -23,6 +23,7 @@ DefaultGroupName={#MyAppName}
 OutputDir={#SourcePath}/../../dist
 OutputBaseFilename=lexpdf-setup
 LicenseFile={#SourcePath}/../../LICENSE
+SetupIconFile={#SourcePath}/lexpdf.ico
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

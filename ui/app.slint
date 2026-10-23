@@ -390,7 +390,8 @@ struct LicRow {
     lic: string,
 }
 
-// Ventana "Acerca de": hueco para el logo, nombre de la app y botón de licencias.
+// Ventana "Acerca de": logo, nombre de la app y botón de licencias.
+// El logo se incrusta en la compilación (@image-url de assets/logo.png).
 export component AboutWindow inherits Window {
     title: "Acerca de LexPDF";
     width: 460px;
@@ -406,16 +407,13 @@ export component AboutWindow inherits Window {
         padding: 24px;
         spacing: 12px;
 
-        // --- hueco para el logo (pon tu imagen en assets/logo.png y
-        //     cámbiala por una Image)
+        // --- logo (assets/logo.png, incrustado en la compilacion)
+        // ponytail: provisional; cambiar assets/logo.png y recompilar
         Rectangle {
             width: 104px; height: 104px;
-            background: #262626; border-radius: 16px;
-            border-width: 2px; border-color: #4a4a4a;
-            Text {
-                text: "LOGO"; font-size: 13px; color: #6a6a6a;
+            Image {
+                source: @image-url("../assets/logo.png");
                 width: parent.width; height: parent.height;
-                horizontal-alignment: center; vertical-alignment: center;
             }
         }
 

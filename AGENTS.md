@@ -127,7 +127,8 @@ Flujos:
   (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".
   Se guardan en `~/.config/lexpdf/settings.json` (0600).
 - **Acerca de / Licencias** (también creadas desde Rust): `AboutWindow` con el
-  hueco del logo + nombre + versión + botón, y `LicensesWindow` con la lista de
+  logo incrustado (`assets/logo.png`, derivado de `assets/logo_prov.png`) +
+  nombre + versión + botón, y `LicensesWindow` con la lista de
   dependencias, el texto completo (ficheros en `assets/licenses/`) y el repo
   (clicable → `xdg-open`/`open`/`cmd start`). `asset_file()` los busca junto al
   exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo.
