@@ -183,7 +183,10 @@ Y lo que **no** podemos prometerte:
 
 ## Ajustes
 
-El botón ⚙ de la barra abre una ventana aparte con:
+El botón ⚙ de la barra lateral (a la izquierda, visible siempre, incluso sin
+PDF abierto) muestra una **capa dentro de la propia ventana**, encima de un velo
+que bloquea todo lo demás hasta cerrarla; las capas se apilan: **Ajustes →
+Acerca de → Licencias**. Contiene:
 
 - **Color del resaltado**: por gravedad (rojo = ortografía, morado = sintaxis) o
   amarillo único. El texto libre siempre va en amarillo.

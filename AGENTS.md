@@ -122,15 +122,32 @@ Flujos:
   `VerticalLayout` del panel hace que el layout reparta el espacio y el panel
   se descuadre (el input y los botones acaban fuera de la ventana): hay que
   darle `height:` explícito.
-- **Ajustes** (ventana aparte, creada desde Rust porque en Slint 1.18 la
-  `Window` no tiene `show()` en .slint): color del resaltado, copia de trabajo
-  (preguntar/siempre/nunca), motor de revisión on/off y botón "Acerca de".
+- **Ajustes** (capa de la ventana principal, no ventana aparte): color del
+  resaltado, copia de trabajo (preguntar/siempre/nunca), motor de revisión on/off
+  y botón "Acerca de". El ⚙ vive en la CABECERA DE LA BARRA LATERAL (visible
+  sin documento; se quitó de la toolbar del documento). Añadir sin documento es
+  trivial ahora porque `on_open_settings` ya no crea nada: solo rellena los
+  props `p-*` y pone `ovl = 1`.
   Se guardan en `~/.config/lexpdf/settings.json` (0600).
-- **Acerca de / Licencias** (también creadas desde Rust): `AboutWindow` con el
-  logo incrustado (`assets/logo.png`, derivado de `assets/logo_prov.png`) +
-  nombre + versión + botón, y `LicensesWindow` con la lista de
-  dependencias, el texto completo (ficheros en `assets/licenses/`) y el repo
-  (clicable → `xdg-open`/`open`/`cmd start`). `asset_file()` los busca junto al
+- **Capas apiladas Ajustes > Acerca de > Licencias** (todas DENTRO de la
+  ventana principal): Slint 1.18 no tiene ventanas modales. AppWindow lleva
+  `ovl` (0 nada · 1 Ajustes · 2 Acerca · 3 Licencias); cada capa es un `if
+  (root.ovl >= N)` con velo `@radial-gradient` + `TouchArea` que se come los
+  clics de lo de abajo + panel centrado. Cierre en cascada: Licencias y Acerca
+  tienen su botón "Cerrar" (→ `ovl = N-1`) y el de Ajustes está junto a
+  "Guardar" (`ovl = 0`). `parent` NO existe en la raíz de un componente: el
+  alto de cada panel se pone al instanciar (`height: min(860px, parent.height
+  - 48px)`). El `AboutPanel` muestra `root.version` vía `ver <=> root.version`
+  y su texto es `"versión " + root.ver`; el autor va hardcodeado en Slint.
+  **GOTCHA tema**: los componentes de capa no ven la paleta de la AppWindow →
+  la paleta vive en el **global `Pal`** (visible desde cualquier componente);
+  la AppWindow aliasa sus `c-*` a `Pal.c-*` y enlaza `is-dark <=> Pal.is-dark`.
+  Si metes un color nuevo en una capa, usa `Pal.*` (no lo escribas fijo o se
+  queda oscuro en tema claro).
+- **Licencias** (capa, ya no ventana): lista de dependencias, el texto completo
+  (ficheros en `assets/licenses/`) y el repo (clicable → `xdg-open`/`open`/
+  `cmd start`). Los datos los alimenta la función Rust `lic_select()` y el
+  callback `open-licenses()` de AppWindow. `asset_file()` los busca junto al
   exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo.
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula

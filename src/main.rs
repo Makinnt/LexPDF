@@ -1093,68 +1093,16 @@ fn open_link(url: &str) {
     let _ = c.spawn();
 }
 
-/// Abre la ventana "Acerca de": hueco para el logo, nombre de la app y el
-/// botón que lleva a las licencias completas.
-fn open_about(about: &Rc<RefCell<Option<AboutWindow>>>, lic: &Rc<RefCell<Option<LicensesWindow>>>) {
-    let mut slot = about.borrow_mut();
-    if slot.is_none() {
-        let Ok(w) = AboutWindow::new() else { return };
-        w.set_version(format!("versión {}", env!("CARGO_PKG_VERSION")).into());
-        w.set_author("por Jose Cauich".into());
-        let l2 = lic.clone();
-        w.on_open_licenses(move || open_licenses(&l2));
-        let weak = w.as_weak();
-        w.on_close_win(move || {
-            if let Some(w) = weak.upgrade() {
-                let _ = w.window().hide();
-            }
-        });
-        *slot = Some(w);
-    }
-    if let Some(w) = slot.as_ref() {
-        let _ = w.window().show();
-    }
-}
-
-/// Abre la ventana de licencias: lista de dependencias + texto completo y repo.
-fn open_licenses(lic: &Rc<RefCell<Option<LicensesWindow>>>) {
-    let entries = license_entries();
-    let mut slot = lic.borrow_mut();
-    if slot.is_none() {
-        let Ok(w) = LicensesWindow::new() else { return };
-        let rows: Vec<LicRow> = entries
-            .iter()
-            .map(|e| LicRow { name: e.name.into(), lic: e.lic.into() })
-            .collect();
-        w.set_items(ModelRc::new(VecModel::from_slice(&rows)));
-        let weak = w.as_weak();
-        let entries2 = entries.clone();
-        w.on_select(move |i| {
-            let Some(w) = weak.upgrade() else { return };
-            let Some(e) = entries2.get(i as usize) else { return };
-            w.set_sel(i);
-            w.set_cur_name(e.name.into());
-            w.set_cur_lic(e.lic.into());
-            w.set_cur_repo(e.repo.into());
-            let t = license_text(e.files);
-            w.set_cur_h(license_height(&t));
-            w.set_cur_text(t.into());
-        });
-        w.on_open_link(move |url| open_link(&url));
-        *slot = Some(w);
-    }
-    if let Some(w) = slot.as_ref() {
-        if let Some(e) = entries.first() {
-            let t = license_text(e.files);
-            w.set_sel(0);
-            w.set_cur_name(e.name.into());
-            w.set_cur_lic(e.lic.into());
-            w.set_cur_repo(e.repo.into());
-            w.set_cur_h(license_height(&t));
-            w.set_cur_text(t.into());
-        }
-        let _ = w.window().show();
-    }
+/// Rellena la capa de licencias con la entrada i de la lista.
+fn lic_select(ui: &AppWindow, i: i32, entries: &[LicInfo]) {
+    let Some(e) = entries.get(i as usize) else { return };
+    ui.set_p_lic_sel(i);
+    ui.set_p_lic_name(e.name.into());
+    ui.set_p_lic_lic(e.lic.into());
+    ui.set_p_lic_repo(e.repo.into());
+    let t = license_text(e.files);
+    ui.set_p_lic_h(license_height(&t));
+    ui.set_p_lic_text(t.into());
 }
 
 /// Parchea los resaltados que se han quedado sin `/QuadPoints`: pdfium no puede
@@ -2365,71 +2313,68 @@ fn main() -> anyhow::Result<()> {
         });
     }
     {
-        // la ventana de ajustes se crea desde Rust (Slint no tiene show() en .slint)
+        // Ajustes/Acerca de/Licencias ya no son ventanas aparte: son capas de la
+        // ventana principal (AppWindow.ovl) sobre un velo (app.slint). Aquí solo
+        // se alimentan con los datos de la sesión.
         let ui_weak = ui.as_weak();
+        let ui_open = ui_weak.clone();
         let st = st.clone();
-        let win: Rc<RefCell<Option<SettingsWindow>>> = Rc::new(RefCell::new(None));
-        let about: Rc<RefCell<Option<AboutWindow>>> = Rc::new(RefCell::new(None));
-        let lic: Rc<RefCell<Option<LicensesWindow>>> = Rc::new(RefCell::new(None));
-        let win2 = win.clone();
-        let about2 = about.clone();
-        let lic2 = lic.clone();
+        let st_open = st.clone();
         ui.on_open_settings(move || {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let s = st.borrow().settings;
-            let mut slot = win2.borrow_mut();
-            if slot.is_none() {
-                match SettingsWindow::new() {
-                    Ok(w) => {
-                        w.set_hl_color(s.hl_color as i32);
-                        w.set_copy_mode(s.copy_mode as i32);
-                        w.set_motor_on(s.motor);
-                        w.set_free_sel(s.free_sel as i32);
-                        w.set_free_text(s.free_text as i32);
-                        let a3 = about2.clone();
-                        let l3 = lic2.clone();
-                        w.on_open_about(move || open_about(&a3, &l3));
-                        let st2 = st.clone();
-                        let ui2 = ui_weak.clone();
-                        w.on_apply(move |hl, copy, motor, fsel, ftext| {
-                            let Some(ui) = ui2.upgrade() else { return };
-                            let s2 = Settings {
-                                hl_color: hl as u8,
-                                copy_mode: copy as u8,
-                                motor,
-                                free_sel: fsel as u8,
-                                free_text: ftext as u8,
-                            };
-                            save_settings(&s2);
-                            {
-                                let mut stt = st2.borrow_mut();
-                                stt.settings = s2;
-                                stt.lt_dead = !s2.motor;
-                            }
-                            ui.set_set_hl_color(hl);
-                            ui.set_set_copy_mode(copy);
-                            ui.set_set_motor(motor);
-                            notify(&ui, &st2, "Ajustes guardados".into());
-                        });
-                        *slot = Some(w);
-                    }
-                    Err(e) => {
-                        notify(&ui, &st, format!("No se pudo abrir Ajustes: {e:?}"));
-                        return;
-                    }
-                }
-            } else if let Some(w) = slot.as_ref() {
-                // se recargan los valores por si cambiaron en otra parte
-                w.set_hl_color(s.hl_color as i32);
-                w.set_copy_mode(s.copy_mode as i32);
-                w.set_motor_on(s.motor);
-                w.set_free_sel(s.free_sel as i32);
-                w.set_free_text(s.free_text as i32);
+            let Some(ui) = ui_open.upgrade() else { return };
+            if ui.get_ovl() == 0 {
+                // si se abre desde cero, se recargan los valores guardados
+                // (si venía de Acerca de atrás, se conservan los no aplicados)
+                let s = st_open.borrow().settings;
+                ui.set_p_hl_color(s.hl_color as i32);
+                ui.set_p_copy_mode(s.copy_mode as i32);
+                ui.set_p_motor_on(s.motor);
+                ui.set_p_free_sel(s.free_sel as i32);
+                ui.set_p_free_text(s.free_text as i32);
             }
-            if let Some(w) = slot.as_ref() {
-                let _ = w.window().show();
-            }
+            ui.set_ovl(1);
         });
+        let lic_weak = ui_weak.clone();
+        ui.on_open_licenses(move || {
+            let Some(ui) = lic_weak.upgrade() else { return };
+            let entries = license_entries();
+            let rows: Vec<LicRow> = entries
+                .iter()
+                .map(|e| LicRow { name: e.name.into(), lic: e.lic.into() })
+                .collect();
+            ui.set_p_lic_items(ModelRc::new(VecModel::from_slice(&rows)));
+            lic_select(&ui, 0, &entries);
+            ui.set_ovl(3);
+        });
+        let apply_weak = ui_weak.clone();
+        let apply_st = st.clone();
+        ui.on_p_apply(move |hl, copy, motor, fsel, ftext| {
+            let Some(ui) = apply_weak.upgrade() else { return };
+            let s2 = Settings {
+                hl_color: hl as u8,
+                copy_mode: copy as u8,
+                motor,
+                free_sel: fsel as u8,
+                free_text: ftext as u8,
+            };
+            save_settings(&s2);
+            {
+                let mut stt = apply_st.borrow_mut();
+                stt.settings = s2;
+                stt.lt_dead = !s2.motor;
+            }
+            ui.set_set_hl_color(hl);
+            ui.set_set_copy_mode(copy);
+            ui.set_set_motor(motor);
+            notify(&ui, &apply_st, "Ajustes guardados".into());
+        });
+        let sel_weak = ui_weak.clone();
+        ui.on_p_lic_select(move |i| {
+            let Some(ui) = sel_weak.upgrade() else { return };
+            let entries = license_entries();
+            lic_select(&ui, i, &entries);
+        });
+        ui.on_p_lic_link(move |url| open_link(&url));
     }
 
     {
