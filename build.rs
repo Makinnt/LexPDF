@@ -1,8 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use std::io::Write;
 
+// icono del exe en Windows: la esquina de la ventana y la barra de tareas
+// lo sacan del recurso incrustado (Slint no tiene set_icon en 1.18)
+#[cfg(windows)]
+fn embed_icon() {
+    winresource::WindowsResource::new()
+        .set_icon("installer/windows/lexpdf.ico")
+        .compile()
+        .expect("incrustar lexpdf.ico");
+}
+
+#[cfg(not(windows))]
+fn embed_icon() {}
+
 fn main() {
     slint_build::compile("ui/app.slint").unwrap();
+
+    embed_icon();
 
     // ponytail: LT (~240MB zip) se descarga una vez a assets/lt/ (gitignoreado);
     // en runtime va empaquetado junto al exe. Requiere red solo la primera vez.
