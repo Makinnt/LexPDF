@@ -207,8 +207,31 @@ Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 
 ## Licencia
 
-**GPL-3.0-only** — ver `LICENSE` (la exige Slint, que va enlazado estáticamente).
-LexPDF — Copyright (C) 2026 Jose Cauich.
-`pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`.
-Iconos: Apache-2.0 (Material Icons). Binarios de LanguageTool: LGPL, como sidecar aparte.
-Los textos completos están en `assets/licenses/` y se ven desde Ajustes → Acerca de.
+**LexPDF** — **GPL-3.0-only** (ver `LICENSE`). La exige Slint, que va enlazado estáticamente.
+
+Licencias de cada componente:
+
+| Componente | Licencia |
+|---|---|
+| Slint (interfaz) | GPL-3.0-only (o licencia comercial de Slint) |
+| PDFium (motor de render) | BSD-3-Clause |
+| LanguageTool (sidecar) | LGPL-2.1 |
+| pdfium-render, ureq, image, rfd, anyhow, serde | MIT o Apache-2.0 |
+| lopdf | MIT |
+| Material Icons Outlined | Apache-2.0 |
+
+LexPDF — Copyright (C) 2026 Jose Cauich. Textos completos en `assets/licenses/`,
+visibles desde la app (Ajustes → Acerca de → Licencias).
+
+> LexPDF is free software: you can redistribute it and/or modify it under
+> the terms of the GNU General Public License as published by the Free
+> Software Foundation, either version 3 of the License, or (at your
+> option) any later version.
+>
+> LexPDF is distributed in the hope that it will be useful, but WITHOUT
+> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+> FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+> for more details.
+>
+> You should have received a copy of the GNU General Public License
+> along with this program.  If not, see <https://www.gnu.org/licenses/>.
