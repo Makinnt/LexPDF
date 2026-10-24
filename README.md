@@ -208,6 +208,7 @@ Se guardan en `~/.config/lexpdf/settings.json` (0600, solo tu usuario).
 ## Licencia
 
 **GPL-3.0-only** — ver `LICENSE` (la exige Slint, que va enlazado estáticamente).
+LexPDF — Copyright (C) 2026 Jose Cauich.
 `pdfium-render`: MIT/Apache. PDFium: BSD + third-party en `assets/pdfium/licenses/`.
 Iconos: Apache-2.0 (Material Icons). Binarios de LanguageTool: LGPL, como sidecar aparte.
 Los textos completos están en `assets/licenses/` y se ven desde Ajustes → Acerca de.
