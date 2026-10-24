@@ -133,6 +133,12 @@ component SettingsPanel inherits Rectangle {
         padding: 18px;
         spacing: 14px;
 
+        // El contenido se desliza si no cabe (ventana baja): los botones de
+        // abajo van FUERA del Flickable y siempre quedan a la vista.
+        Flickable {
+            VerticalLayout {
+                spacing: 14px;
+
         Text { text: "Ajustes"; font-size: 18px; font-weight: 700; color: Pal.c-fg; }
 
         // --- color del resaltado
@@ -398,9 +404,10 @@ component SettingsPanel inherits Rectangle {
                 font-size: 11px; color: Pal.c-dim; wrap: word-wrap;
             }
         }
+        }
+        }
 
-        Rectangle { vertical-stretch: 1; }
-
+        // Botones fijos (fuera del Flickable): nunca se salen por abajo.
         HorizontalLayout {
             spacing: 8px;
             alignment: end;

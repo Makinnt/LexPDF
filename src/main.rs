@@ -1088,10 +1088,17 @@ fn asset_file(name: &str) -> Option<PathBuf> {
 /// columna de 520px. Puro y testeable.
 /// Alto estimado de una card de la lista de errores en px. El Flickable con
 /// `for` no computa el content-height (slint#407): se lo damos sumando estas
-/// estimaciones. Fuentes del repo: desc 13px, sug 12px, botones 26px.
+/// estimaciones. En Windows las fuentes (Segoe UI) son más anchas que las de
+/// Linux: si la estimación se queda corta NO se llega a la última card, así
+/// que ahí la columna se calcula más generosa (medido en la build real).
 fn card_h(desc: &str, sug: &str, grouped: bool) -> i32 {
     let lines = |t: &str, per: f32| -> i32 { (t.chars().count() as f32 / per).ceil().max(1.0) as i32 };
-    let mut h = 12 + 20 + 6 + lines(desc, 55.0) * 15 + lines(sug, 60.0) * 14 + 3 + 26 + 6;
+    let (per_d, lh_d, per_s, lh_s) = if cfg!(windows) {
+        (38.0, 17.0, 44.0, 15.0)   // Windows: ~38 chars a 13px en una columna real de ~320px
+    } else {
+        (55.0, 15.0, 60.0, 14.0)   // Linux
+    };
+    let mut h = 12 + 20 + 6 + lines(desc, per_d) * (lh_d as i32) + lines(sug, per_s) * (lh_s as i32) + 3 + 26 + 6;
     if grouped {
         h += 3 + 26; // filas de Agrupar/Desagrupar
     }
