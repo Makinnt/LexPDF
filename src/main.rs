@@ -569,12 +569,14 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
     }
     st.borrow_mut().view = view;
     st.borrow_mut().view_group = view_group;
-    // slint#407: el Flickable de cards necesita el alto total del contenido
+    // slint#407: el Flickable de cards necesita un MIN-height de contenido que
+    // cubra el real (las cards ya miden su alto natural): 30% de margen sobre
+    // la estimación para que el scroll llegue de sobra en Windows.
     let mut htot = 6 * rows.len() as i32;
     for r in &rows {
         htot += r.h;
     }
-    ui.set_errors_h(htot);
+    ui.set_errors_h(htot * 13 / 10);
     ui.set_errors(ModelRc::new(VecModel::from_slice(&rows)));
     if rows.is_empty() {
         // ventana en blanco con causa: sin motor no hay nada que listar

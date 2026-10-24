@@ -639,6 +639,7 @@ global Pal {
 
 export component AppWindow inherits Window {
     title: "LexPDF";
+    icon: @image-url("../assets/logo.png");
     min-width: 900px;
     min-height: 600px;
     init => { root.win-w = self.width; root.win-h = self.height; }
@@ -949,13 +950,14 @@ export component AppWindow inherits Window {
                     // su alto (h) para que el layout no reparta el hueco
                     VerticalLayout {
                         // slint#407: el content-height del Flickable sale del
-                        // MIN-height del layout del viewport (no de height) —
-                        // sin esto el scroll muere en el alto visible.
+                        // MIN-height del layout del viewport (no de height).
+                        // errors-h lleva margen: es suelo, no alto exacto.
                         min-height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
-                        height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         spacing: 6px;
+                        // Cards a ALTO NATURAL (sin height fija): el padding y
+                        // los recortes del botón Borrar eran la estimación
+                        // desfasada en Windows.
                         for e[i] in root.errors: Rectangle {
-                            height: (e.h + (root.selected-note == i ? 62 : 0)) * 1px;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
@@ -988,7 +990,7 @@ export component AppWindow inherits Window {
                                             clicked => { root.omit-clicked(i); }
                                         }
                                         MiniBtn {
-                                            label: "Comentar";
+                                            label: "Añadir comentario";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.note-clicked(i); }
                                         }
@@ -1007,7 +1009,11 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 4px;
                                         visible: e.count >= 5;
+                                        // ancho propio: si no, al ser el único del
+                                        // fila con stretch se come toda la card
                                         MiniBtn {
+                                            width: 100px;
+                                            horizontal-stretch: 0;
                                             label: e.is-group ? "Desagrupar (×" + e.count + ")" : "Agrupar (×" + e.count + ")";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.group-toggle(i); }
