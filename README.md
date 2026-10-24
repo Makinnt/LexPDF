@@ -197,6 +197,8 @@ Acerca de → Licencias**. Contiene:
   las notas y los resaltados.
 - **Motor de revisión**: activado (el texto se revisa en local) o desactivado (no se
   envía ni una palabra a ningún proceso).
+- **Ubicación del aviso**: si las pastillas de aviso salen arriba (por defecto)
+  o abajo de la ventana.
 - **Acerca de**: el logo, el nombre de la app y un botón con las **licencias
   enteras** de cada dependencia (Slint, PDFium, LanguageTool, lopdf, los iconos…)
   y el enlace a su repositorio. El texto de la licencia se desliza con la rueda.

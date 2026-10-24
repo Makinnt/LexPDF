@@ -152,6 +152,22 @@ Flujos:
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.
+- **GOTCHA slint#407 (cards)**: `Flickable` + `for` NO computa
+  `content-height` (bug oficial de Slint). Las cards llevan `h` (alto
+  estimado en Rust con `card_h()`, estilo `license_height()`) y el
+  `Flickable` recibe el sumatorio en `errors-h` (+62 si el editor de
+  comentario está abierto); sin eso la lista no desliza y el layout reparte
+  el alto fijo como hueco muerto dentro de las cards.
+- **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
+  1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
+  glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
+  las fuentes base de Windows y no se dibuja.
+- **Icono de ventana/corner**: Windows no lo pone del recurso del exe por
+  su cuenta (winit registra la clase con `hIcon: 0` y Slint no llama
+  `set_window_icon`): se pone con la propiedad nativa **`icon` del
+  `Window`** de Slint (`icon: @image-url(...)`; el backend winit llama
+  set_window_icon + set_taskbar_icon). El `.ico` de `winresource` en
+  build.rs solo sirve para Explorer/accesos directos.
 - **GOTCHA `err_anno`**: el mapa error -> anotación guarda la **clave**
   (página + rect), NO el índice en `doc_notes`: al borrar una nota los índices
   se desplazan y el "Borrar" de la card acababa borrando la anotación

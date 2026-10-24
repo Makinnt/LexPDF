@@ -501,22 +501,29 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
             let gsev = worst_sev(all.iter().filter(|x| x.word == e.word).map(|x| x.sev.as_str()));
             view.push(lead);
             view_group.push(Some(e.word.clone()));
+            let gdesc = if en {
+                format!("Repeated {n} times — comment/reject applies to all")
+            } else {
+                format!("Se repite {n} veces — comentar/rechazar aplica a todas")
+            };
+            let gsug = if sug.is_empty() {
+                (if en { "No suggestions" } else { "No hay sugerencias" }).to_string()
+            } else {
+                format!("→ {} | {}", sug.join(", "), if en { "tap for pages" } else { "toca para ver páginas" })
+            };
             rows.push(ErrRow {
                 word: format!("{} (×{n})", e.word).into(),
-                sug: if sug.is_empty() {
-                    (if en { "No suggestions" } else { "No hay sugerencias" }).into()
-                } else {
-                    format!("→ {} | {}", sug.join(", "), if en { "tap for pages" } else { "toca para ver páginas" }).into()
-                },
+                sug: gsug.clone().into(),
                 page: e.page as i32,
                 dimmed,
                 kind: e.kind.clone().into(),
                 sev: gsev.into(),
                 bar: kind_bar(gsev),
-                desc: (if en { format!("Repeated {n} times — comment/reject applies to all") } else { format!("Se repite {n} veces — comentar/rechazar aplica a todas") }).into(),
+                desc: gdesc.clone().into(),
                 count: n as i32,
                 is_group: true,
                 has_anno: all.iter().enumerate().any(|(k, x)| x.word == e.word && err_anno.contains_key(&k)),
+                h: card_h(&gdesc, &gsug, true),
             });
         } else {
             view.push(gi);
@@ -537,11 +544,18 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 count: n as i32,
                 is_group: false,
                 has_anno: err_anno.contains_key(&gi),
+                h: card_h(&desc_for(&e.kind, en), &format!("→ {}", e.sug.join(", ")), false),
             });
         }
     }
     st.borrow_mut().view = view;
     st.borrow_mut().view_group = view_group;
+    // slint#407: el Flickable de cards necesita el alto total del contenido
+    let mut htot = 6 * rows.len() as i32;
+    for r in &rows {
+        htot += r.h;
+    }
+    ui.set_errors_h(htot);
     ui.set_errors(ModelRc::new(VecModel::from_slice(&rows)));
     if rows.is_empty() {
         // ventana en blanco con causa: sin motor no hay nada que listar
@@ -973,11 +987,13 @@ struct Settings {
     /// con free_sel=1: 0 = por recuadro (una caja por palabra), 1 = selección
     /// real de texto (una banda continua por línea)
     free_text: u8,
+    /// avisos (toast): 0 = arriba · 1 = abajo
+    toast_pos: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0, free_text: 1 }
+        Settings { hl_color: 0, copy_mode: 0, motor: true, free_sel: 0, free_text: 1, toast_pos: 0 }
     }
 }
 
@@ -1051,6 +1067,18 @@ fn asset_file(name: &str) -> Option<PathBuf> {
 
 /// Alto estimado del texto de una licencia (px) a 11px de fuente en una
 /// columna de 520px. Puro y testeable.
+/// Alto estimado de una card de la lista de errores en px. El Flickable con
+/// `for` no computa el content-height (slint#407): se lo damos sumando estas
+/// estimaciones. Fuentes del repo: desc 13px, sug 12px, botones 26px.
+fn card_h(desc: &str, sug: &str, grouped: bool) -> i32 {
+    let lines = |t: &str, per: f32| -> i32 { (t.chars().count() as f32 / per).ceil().max(1.0) as i32 };
+    let mut h = 12 + 20 + 6 + lines(desc, 55.0) * 15 + lines(sug, 60.0) * 14 + 3 + 26 + 6;
+    if grouped {
+        h += 3 + 26; // filas de Agrupar/Desagrupar
+    }
+    h
+}
+
 fn license_height(text: &str) -> i32 {
     let chars = text.chars().count() as f32;
     let lineas = text.lines().count() as f32;
@@ -1833,6 +1861,7 @@ fn bind_pdfium() -> Pdfium {
 fn main() -> anyhow::Result<()> {
     let ui = AppWindow::new()?;
     ui.set_version(env!("CARGO_PKG_VERSION").into());
+    ui.set_toast_pos(load_settings().toast_pos as i32);
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
@@ -2331,6 +2360,7 @@ fn main() -> anyhow::Result<()> {
                 ui.set_p_motor_on(s.motor);
                 ui.set_p_free_sel(s.free_sel as i32);
                 ui.set_p_free_text(s.free_text as i32);
+                ui.set_p_toast_pos(s.toast_pos as i32);
             }
             ui.set_ovl(1);
         });
@@ -2348,7 +2378,7 @@ fn main() -> anyhow::Result<()> {
         });
         let apply_weak = ui_weak.clone();
         let apply_st = st.clone();
-        ui.on_p_apply(move |hl, copy, motor, fsel, ftext| {
+        ui.on_p_apply(move |hl, copy, motor, fsel, ftext, tpos| {
             let Some(ui) = apply_weak.upgrade() else { return };
             let s2 = Settings {
                 hl_color: hl as u8,
@@ -2356,6 +2386,7 @@ fn main() -> anyhow::Result<()> {
                 motor,
                 free_sel: fsel as u8,
                 free_text: ftext as u8,
+                toast_pos: tpos as u8,
             };
             save_settings(&s2);
             {
@@ -2366,6 +2397,7 @@ fn main() -> anyhow::Result<()> {
             ui.set_set_hl_color(hl);
             ui.set_set_copy_mode(copy);
             ui.set_set_motor(motor);
+            ui.set_toast_pos(tpos);
             notify(&ui, &apply_st, "Ajustes guardados".into());
         });
         let sel_weak = ui_weak.clone();

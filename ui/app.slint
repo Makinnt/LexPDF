@@ -8,6 +8,7 @@ component IconZoomOut inherits Path { commands: "M15.5 14h-.79l-.28-.27C15.41 12
 // marcador (resaltar): el icono viejo (punta de pluma) se confundia con el de borrar
 component IconMarker inherits Path { commands: "m6 14 3 3v5h6v-5l3-3V9H6v5zm2-3h8v2.17l-3 3V20h-2v-3.83l-3-3V11zm3-9h2v3h-2zM3.502 5.874 4.916 4.46l2.122 2.12-1.414 1.415zm13.458.708 2.123-2.12 1.413 1.416-2.123 2.12z"; }
 component IconDelete inherits Path { commands: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"; }
+component IconClose inherits Path { commands: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"; }
 component IconSettings inherits Path { commands: "M19.43 12.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.09-.16-.26-.25-.44-.25-.06 0-.12.01-.17.03l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.06-.02-.12-.03-.18-.03-.17 0-.34.09-.43.25l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.09.16.26.25.44.25.06 0 .12-.01.17-.03l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.06.02.12.03.18.03.17 0 .34-.09.43-.25l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zm-1.98-1.71c.04.31.05.52.05.73 0 .21-.02.43-.05.73l-.14 1.13.89.7 1.08.84-.7 1.21-1.27-.51-1.04-.42-.9.68c-.43.32-.84.56-1.25.73l-1.06.43-.16 1.13-.2 1.35h-1.4l-.19-1.35-.16-1.13-1.06-.43c-.43-.18-.83-.41-1.23-.71l-.91-.7-1.06.43-1.27.51-.7-1.21 1.08-.84.89-.7-.14-1.13c-.03-.31-.05-.54-.05-.74s.02-.43.05-.73l.14-1.13-.89-.7-1.08-.84.7-1.21 1.27.51 1.04.42.9-.68c.43-.32.84-.56 1.25-.73l1.06-.43.16-1.13.2-1.35h1.39l.19 1.35.16 1.13 1.06.43c.43.18.83.41 1.23.71l.91.7 1.06-.43 1.27-.51.7 1.21-1.07.85-.89.7.14 1.13zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"; }
 
 struct ErrRow {
@@ -22,6 +23,7 @@ struct ErrRow {
     count: int,
     is_group: bool,
     has_anno: bool,   // ya tiene resaltado+comentario (se puede borrar)
+    h: int,           // alto estimado de la card (lo pone Rust; slint#407)
 }
 
 struct NoteRow {
@@ -122,7 +124,8 @@ component SettingsPanel inherits Rectangle {
     in-out property <bool> motor-on: true;
     in-out property <int> free-sel: 0;    // 0 = área, 1 = texto
     in-out property <int> free-text: 1;   // con free-sel=1: 0 = recuadros, 1 = selección
-    callback apply(int, int, bool, int, int);
+    in-out property <int> toast-pos: 0;   // 0 = arriba, 1 = abajo
+    callback apply(int, int, bool, int, int, int);
     callback open-about();
     callback close-win();
 
@@ -340,6 +343,39 @@ component SettingsPanel inherits Rectangle {
             }
         }
 
+        // --- avisos (toast)
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Ubicación del aviso"; font-size: 14px; font-weight: 700; color: Pal.c-fg; }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.toast-pos == 0 ? Pal.c-fg : Pal.c-pill;
+                    border-width: 1px; border-color: Pal.c-line;
+                    Text {
+                        text: "Arriba"; font-size: 13px;
+                        color: root.toast-pos == 0 ? Pal.c-accent-fg : Pal.c-fg;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.toast-pos = 0; } }
+                }
+                Rectangle {
+                    height: 30px; horizontal-stretch: 1; border-radius: 4px;
+                    background: root.toast-pos == 1 ? Pal.c-fg : Pal.c-pill;
+                    border-width: 1px; border-color: Pal.c-line;
+                    Text {
+                        text: "Abajo"; font-size: 13px;
+                        color: root.toast-pos == 1 ? Pal.c-accent-fg : Pal.c-fg;
+                        width: parent.width; height: parent.height;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    TouchArea { width: parent.width; height: parent.height; clicked => { root.toast-pos = 1; } }
+                }
+            }
+        }
+
         // --- acerca de
         VerticalLayout {
             spacing: 6px;
@@ -391,7 +427,7 @@ component SettingsPanel inherits Rectangle {
                 }
                 TouchArea {
                     width: parent.width; height: parent.height;
-                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on, root.free-sel, root.free-text); }
+                    clicked => { root.apply(root.hl-color, root.copy-mode, root.motor-on, root.free-sel, root.free-text, root.toast-pos); }
                 }
             }
         }
@@ -610,6 +646,10 @@ export component AppWindow inherits Window {
     in-out property <int> word-count: 0;
     in-out property <string> word-sample: "";
     in-out property <[ErrRow]> errors;
+    // alto total estimado de las cards (Rust) + editor de comentario si está abierto
+    in-out property <int> errors-h: 0;
+    // ubicación del aviso (toast): 0 = arriba (por defecto) · 1 = abajo
+    in-out property <int> toast-pos: 0;
     in-out property <[NoteRow]> page-notes;
     in-out property <int> note-total: 0;
     in-out property <bool> has-working: true;
@@ -699,6 +739,7 @@ export component AppWindow inherits Window {
     in-out property <bool> p-motor-on: true;
     in-out property <int> p-free-sel: 0;
     in-out property <int> p-free-text: 1;
+    in-out property <int> p-toast-pos: 0;
     in-out property <[LicRow]> p-lic-items;
     in-out property <int> p-lic-sel: 0;
     in-out property <string> p-lic-name: "";
@@ -707,7 +748,7 @@ export component AppWindow inherits Window {
     in-out property <string> p-lic-text: "";
     in-out property <int> p-lic-h: 400;
     callback open-licenses();
-    callback p-apply(int, int, bool, int, int);
+    callback p-apply(int, int, bool, int, int, int);
     callback p-lic-select(int);
     callback p-lic-link(string);
 
@@ -896,9 +937,14 @@ export component AppWindow inherits Window {
                 Flickable {
                     height: 420px;
                     visible: root.has-doc;
+                    // slint issue #407: Flickable + `for` no calcula el alto del
+                    // contenido; lo alimenta Rust (errors-h) y cada card lleva
+                    // su alto (h) para que el layout no reparta el hueco
                     VerticalLayout {
+                        height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         spacing: 6px;
                         for e[i] in root.errors: Rectangle {
+                            height: (e.h + (root.selected-note == i ? 62 : 0)) * 1px;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
@@ -1296,7 +1342,7 @@ export component AppWindow inherits Window {
                 width: min(520px, parent.width - 32px);
                 height: 52px;
                 x: (parent.width - self.width) / 2;
-                y: parent.height - self.height - 16px;
+                y: root.toast-pos == 0 ? 16px : parent.height - self.height - 16px;
                 background: root.c-accent; border-radius: 8px;
                 HorizontalLayout {
                     padding-left: 14px; padding-right: 14px; spacing: 10px;
@@ -1306,7 +1352,11 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1; vertical-alignment: center;
                         wrap: word-wrap; overflow: elide;
                     }
-                    Text { text: "✕"; color: root.c-accent-fg; font-size: 12px; vertical-alignment: center; }
+                    IconClose {
+                        width: 14px; height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        fill: root.c-accent-fg;
+                    }
                 }
                 TouchArea { width: parent.width; height: parent.height; clicked => { root.popup-dismiss(); } }
             }
@@ -1381,7 +1431,8 @@ export component AppWindow inherits Window {
             motor-on <=> root.p-motor-on;
             free-sel <=> root.p-free-sel;
             free-text <=> root.p-free-text;
-            apply(hl, cm, mo, fs, ft) => { root.p-apply(hl, cm, mo, fs, ft); }
+            toast-pos <=> root.p-toast-pos;
+            apply(hl, cm, mo, fs, ft, tp) => { root.p-apply(hl, cm, mo, fs, ft, tp); }
             open-about => { root.ovl = 2; }
             close-win => { root.ovl = 0; }
         }
