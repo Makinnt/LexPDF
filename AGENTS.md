@@ -144,11 +144,20 @@ Flujos:
   la AppWindow aliasa sus `c-*` a `Pal.c-*` y enlaza `is-dark <=> Pal.is-dark`.
   Si metes un color nuevo en una capa, usa `Pal.*` (no lo escribas fijo o se
   queda oscuro en tema claro).
-- **Licencias** (capa, ya no ventana): lista de dependencias, el texto completo
-  (ficheros en `assets/licenses/`) y el repo (clicable → `xdg-open`/`open`/
-  `cmd start`). Los datos los alimenta la función Rust `lic_select()` y el
+- **Licencias** (capa, ya no ventana): lista de dependencias, el texto REAL de
+  cada repo (bajado una vez a `assets/licenses/<dep>-<lic>.txt` y commiteado:
+  la app sigue offline; nada de textos genéricos compartidos — el MIT de ureq
+  lleva su copyright y el de lopdf el suyo; el test
+  `los_textos_de_licencia_son_los_correctos` + `every_listed_license_file_exists`
+  lo garantizan) y el repo (clicable → `xdg-open`/`open`/`cmd start`). OJO con
+  los repos reales: pdfium-render=ajrcarey, lopdf=J-F-Liu, rfd=PolyMeilex.
+  Los datos los alimenta la función Rust `lic_select()` y el
   callback `open-licenses()` de AppWindow. `asset_file()` los busca junto al
-  exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo.
+  exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo
+  del proyecto. **GOTCHA packaging**: el `release.yml` de Windows tenía que
+  copiar `assets/licenses` él mismo (el `stage.ps1` no lo llama el CI) y el
+  `.iss` lleva `licenses\*` a `{app}\licenses`: si falta, TODAS las entradas
+  muestran "no se encontró", incluida la GPL de la app.
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.

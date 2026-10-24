@@ -7,7 +7,7 @@
 #define MyAppName "LexPDF"
 #define MyAppName "LexPDF"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.3"
+  #define MyAppVersion "0.2.4"
 #endif
 #define MyAppPublisher "LexiSec"
 #define StageDir SourcePath + "/../../dist/windows"
@@ -42,6 +42,7 @@ Name: "desktopicon"; Description: "Crear icono en el escritorio"; GroupDescripti
 [Files]
 Source: "{#StageDir}\lexpdf.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "{#StageDir}\lt\*"; DestDir: "{app}\lt"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; JRE empaquetado (opcional: si no está, el instalador pedirá Java, ver [Code])
 Source: "{#StageDir}\jre\*"; DestDir: "{app}\jre"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist

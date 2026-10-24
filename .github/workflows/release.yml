@@ -130,6 +130,7 @@ jobs:
           Copy-Item target/release/lexpdf.exe dist/windows/
           Copy-Item assets/pdfium/pdfium.dll dist/windows/
           Copy-Item assets/lt dist/windows/lt -Recurse -Force
+          Copy-Item assets/licenses dist/windows/licenses -Recurse -Force
       - name: Versión desde el tag (sin la v)
         id: ver
         shell: pwsh

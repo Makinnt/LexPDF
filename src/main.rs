@@ -1035,18 +1035,18 @@ struct LicInfo {
 /// `files` son nombres de `assets/licenses/` (se copian junto al programa).
 fn license_entries() -> Vec<LicInfo> {
     vec![
-        LicInfo { name: "LexPDF (esta app)", lic: "GPL-3.0-only", repo: "https://github.com/Makinnt/LexPDF", files: &["GPL-3.txt"] },
-        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only (o licencia comercial de Slint)", repo: "https://github.com/slint-ui/slint", files: &["GPL-3.txt"] },
-        LicInfo { name: "PDFium (motor de render)", lic: "BSD-3-Clause", repo: "https://pdfium.googlesource.com/pdfium/", files: &["PDFIUM-BSD.txt"] },
-        LicInfo { name: "pdfium-render", lic: "MIT o Apache-2.0", repo: "https://github.com/bblanchon/pdfium-render", files: &["MIT.txt", "Apache-2.0.txt"] },
-        LicInfo { name: "LanguageTool (motor de revisión)", lic: "LGPL-2.1", repo: "https://github.com/languagetool-org/languagetool", files: &["LGPL-2.1.txt"] },
-        LicInfo { name: "lopdf", lic: "MIT", repo: "https://github.com/jamesduffy/lopdf", files: &["MIT.txt"] },
-        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT o Apache-2.0", repo: "https://github.com/algesten/ureq", files: &["MIT.txt", "Apache-2.0.txt"] },
-        LicInfo { name: "image", lic: "MIT o Apache-2.0", repo: "https://github.com/image-rs/image", files: &["MIT.txt", "Apache-2.0.txt"] },
-        LicInfo { name: "rfd (diálogo de archivos)", lic: "MIT", repo: "https://github.com/EmilHerngren/rfd", files: &["MIT.txt"] },
-        LicInfo { name: "anyhow", lic: "MIT o Apache-2.0", repo: "https://github.com/dtolnay/anyhow", files: &["MIT.txt", "Apache-2.0.txt"] },
-        LicInfo { name: "serde / serde_json", lic: "MIT o Apache-2.0", repo: "https://github.com/serde-rs/serde", files: &["MIT.txt", "Apache-2.0.txt"] },
-        LicInfo { name: "Material Icons Outlined", lic: "Apache-2.0", repo: "https://github.com/google/material-design-icons", files: &["Material-Icons-Apache-2.0.txt", "Apache-2.0.txt"] },
+        LicInfo { name: "LexPDF (esta app)", lic: "GPL-3.0-only", repo: "https://github.com/Makinnt/LexPDF", files: &["GPL3-LexPDF.txt"] },
+        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only (o licencia comercial de Slint)", repo: "https://github.com/slint-ui/slint", files: &["GPL3-Slint.txt"] },
+        LicInfo { name: "PDFium (motor de render)", lic: "BSD-3-Clause", repo: "https://github.com/pdfium/pdfium", files: &["BSD3-PDFium.txt"] },
+        LicInfo { name: "pdfium-render", lic: "MIT o Apache-2.0", repo: "https://github.com/ajrcarey/pdfium-render", files: &["MIT-pdfium-render.txt", "Apache2-pdfium-render.txt"] },
+        LicInfo { name: "LanguageTool (motor de revisión)", lic: "LGPL-2.1", repo: "https://github.com/languagetool-org/languagetool", files: &["LGPL21-LT.txt"] },
+        LicInfo { name: "lopdf", lic: "MIT", repo: "https://github.com/J-F-Liu/lopdf", files: &["MIT-lopdf.txt"] },
+        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT o Apache-2.0", repo: "https://github.com/algesten/ureq", files: &["MIT-ureq.txt", "Apache2-ureq.txt"] },
+        LicInfo { name: "image", lic: "MIT o Apache-2.0", repo: "https://github.com/image-rs/image", files: &["MIT-image.txt", "Apache2-image.txt"] },
+        LicInfo { name: "rfd (diálogo de archivos)", lic: "MIT", repo: "https://github.com/PolyMeilex/rfd", files: &["MIT-rfd.txt"] },
+        LicInfo { name: "anyhow", lic: "MIT o Apache-2.0", repo: "https://github.com/dtolnay/anyhow", files: &["MIT-anyhow.txt", "Apache2-anyhow.txt"] },
+        LicInfo { name: "serde / serde_json", lic: "MIT o Apache-2.0", repo: "https://github.com/serde-rs/serde", files: &["MIT-serde.txt", "Apache2-serde.txt"] },
+        LicInfo { name: "Material Icons Outlined", lic: "Apache-2.0", repo: "https://github.com/google/material-design-icons", files: &["Apache2-icons.txt"] },
     ]
 }
 
@@ -3203,7 +3203,7 @@ mod tests {
     #[test]
     fn el_alto_de_la_licencia_crece_con_el_texto() {
         let corto = license_height("una linea\n");
-        let largo = license_text(&["GPL-3.txt"]);
+        let largo = license_text(&["GPL3-LexPDF.txt"]);
         assert!(license_height(&largo) > corto * 10, "el texto largo debe más alto");
         assert!(license_height(&largo) < 60000);
     }
@@ -3243,18 +3243,25 @@ mod tests {
     /// El texto de cada licencia debe ser el de verdad (y no el de otra).
     #[test]
     fn los_textos_de_licencia_son_los_correctos() {
-        let gpl = license_text(&["GPL-3.txt"]);
-        assert!(gpl.contains("GNU GENERAL PUBLIC LICENSE"), "no es la GPL:\n{}", &gpl[..gpl.len().min(120)]);
-        let apache = license_text(&["Apache-2.0.txt"]);
-        assert!(apache.contains("Apache License"), "no es la Apache");
-        let lgpl = license_text(&["LGPL-2.1.txt"]);
-        assert!(lgpl.contains("GNU LESSER GENERAL PUBLIC LICENSE"), "no es la LGPL");
-        let mit = license_text(&["MIT.txt"]);
-        assert!(mit.contains("MIT License"), "no es la MIT");
-        // la primera entrada de la lista es la app: GPL
+        // cada texto real de cada repo (nada de genéricos compartidos)
         let entries = license_entries();
-        let e = entries.first().unwrap();
-        assert!(license_text(e.files).contains("GNU GENERAL PUBLIC LICENSE"));
+        let first = license_text(entries[0].files);     // LexPDF: GPL-3
+        assert!(first.contains("GNU GENERAL PUBLIC LICENSE"), "no es la GPL:\n{}", &first[..first.len().min(120)]);
+        let slint = license_text(entries[1].files);     // Slint: GPL-3
+        assert!(slint.contains("GNU GENERAL PUBLIC LICENSE"), "no es la GPL de Slint");
+        let pdfium = license_text(&["BSD3-PDFium.txt"]);
+        assert!(pdfium.contains("PDFium Authors"), "no es la BSD de PDFium");
+        let pdfr_mit = license_text(&["MIT-pdfium-render.txt"]);
+        assert!(pdfr_mit.contains("MIT License") && pdfr_mit.contains("Alastair Carey"), "no es la MIT de pdfium-render");
+        let lt = license_text(&["LGPL21-LT.txt"]);
+        assert!(lt.contains("GNU LESSER GENERAL PUBLIC LICENSE"), "no es la LGPL");
+        let mit = license_text(&["MIT-lopdf.txt"]);
+        assert!(mit.contains("MIT License") && mit.contains("Junfeng Liu"), "no es la MIT de lopdf");
+        // y ninguna lista puede traer "no se encontró"
+        for e in &entries {
+            let t = license_text(e.files);
+            assert!(!t.contains("no se encontró") && !t.contains("no se pudo leer"), "{}: {}", e.name, &t[..t.len().min(80)]);
+        }
     }
 
     /// Un resaltado por texto sale continuo: una banda por línea, sin huecos
@@ -3288,6 +3295,16 @@ mod tests {
     /// ningún lector) y con el texto del documento intacto.
 
     /// Borrar una anotación la quita del PDF (y de la lista en memoria).
+
+    #[test]
+    fn every_listed_license_file_exists() {
+        // si falta un .txt ya no se ve "no se encontró X" dentro de la app
+        for e in license_entries() {
+            for f in e.files {
+                assert!(asset_file(f).is_some(), "falta assets/licenses/{f} (entró {})", e.name);
+            }
+        }
+    }
 
     #[test]
     fn working_copy_is_private() {        // nombre propio: los tests corren en paralelo y comparten /tmp
