@@ -948,6 +948,10 @@ export component AppWindow inherits Window {
                     // contenido; lo alimenta Rust (errors-h) y cada card lleva
                     // su alto (h) para que el layout no reparta el hueco
                     VerticalLayout {
+                        // slint#407: el content-height del Flickable sale del
+                        // MIN-height del layout del viewport (no de height) —
+                        // sin esto el scroll muere en el alto visible.
+                        min-height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         spacing: 6px;
                         for e[i] in root.errors: Rectangle {

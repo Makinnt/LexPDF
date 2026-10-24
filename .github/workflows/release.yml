@@ -76,7 +76,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          prerelease: true
+          name: Release ${{ github.ref_name }} (experimental)
           body: |
             ## Novedades de la v0.2.0
 
@@ -182,7 +183,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          prerelease: true
+          name: Release ${{ github.ref_name }} (experimental)
           body: |
             ## Novedades de la v0.2.0
 
