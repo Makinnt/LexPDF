@@ -542,7 +542,6 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 count: n as i32,
                 is_group: true,
                 has_anno: all.iter().enumerate().any(|(k, x)| x.word == e.word && err_anno.contains_key(&k)),
-                h: card_h(&gdesc, &gsug, true),
             });
         } else {
             view.push(gi);
@@ -563,20 +562,11 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 count: n as i32,
                 is_group: false,
                 has_anno: err_anno.contains_key(&gi),
-                h: card_h(&desc_for(&e.kind, en), &format!("→ {}", e.sug.join(", ")), false),
             });
         }
     }
     st.borrow_mut().view = view;
     st.borrow_mut().view_group = view_group;
-    // slint#407: el Flickable de cards necesita un MIN-height de contenido que
-    // cubra el real (las cards ya miden su alto natural): 30% de margen sobre
-    // la estimación para que el scroll llegue de sobra en Windows.
-    let mut htot = 6 * rows.len() as i32;
-    for r in &rows {
-        htot += r.h;
-    }
-    ui.set_errors_h(htot * 13 / 10);
     ui.set_errors(ModelRc::new(VecModel::from_slice(&rows)));
     if rows.is_empty() {
         // ventana en blanco con causa: sin motor no hay nada que listar
@@ -1087,26 +1077,6 @@ fn asset_file(name: &str) -> Option<PathBuf> {
 }
 
 /// Alto estimado del texto de una licencia (px) a 11px de fuente en una
-/// columna de 520px. Puro y testeable.
-/// Alto estimado de una card de la lista de errores en px. El Flickable con
-/// `for` no computa el content-height (slint#407): se lo damos sumando estas
-/// estimaciones. En Windows las fuentes (Segoe UI) son más anchas que las de
-/// Linux: si la estimación se queda corta NO se llega a la última card, así
-/// que ahí la columna se calcula más generosa (medido en la build real).
-fn card_h(desc: &str, sug: &str, grouped: bool) -> i32 {
-    let lines = |t: &str, per: f32| -> i32 { (t.chars().count() as f32 / per).ceil().max(1.0) as i32 };
-    let (per_d, lh_d, per_s, lh_s) = if cfg!(windows) {
-        (38.0, 17.0, 44.0, 15.0)   // Windows: ~38 chars a 13px en una columna real de ~320px
-    } else {
-        (55.0, 15.0, 60.0, 14.0)   // Linux
-    };
-    let mut h = 12 + 20 + 6 + lines(desc, per_d) * (lh_d as i32) + lines(sug, per_s) * (lh_s as i32) + 3 + 26 + 6;
-    if grouped {
-        h += 3 + 26; // filas de Agrupar/Desagrupar
-    }
-    h
-}
-
 fn license_height(text: &str) -> i32 {
     let chars = text.chars().count() as f32;
     let lineas = text.lines().count() as f32;

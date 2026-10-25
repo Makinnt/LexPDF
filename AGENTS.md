@@ -164,15 +164,19 @@ Flujos:
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.
-- **GOTCHA slint#407 (cards)**: en el pase `flickable.rs` del compilador,
-  `content-height` = `max(alto del Flickable, **min-height** del layout hijo)`
-  y los layouts con `for` directo quedan filtrados (`FIXME #407`). Por eso:
-  la lista es un `VerticalLayout` (no repetido) con **`min-height` explícito**
-  puesto desde Rust (`errors-h` +62 si el editor de comentario está abierto);
-  poner solo `height` **no** da scroll. Las cards miden **alto natural** (sin
-  `height` fija ni `e.h`): una altura estimada se desfasa con la fuente de
-  Windows y produce padding fantasma y botones recortados. `errors-h` va con
-  +30% de margen (`htot * 13 / 10`) porque es un **suelo**, no el alto exacto.
+- **GOTCHA slint#407 (cards)**: `Flickable` no calcula `content-height`
+  cuando el contenido es un `for`; el pase `flickable.rs` lo deriva del
+  **`min-height` del layout hijo** (y `layout.rs` deriva `min-height` de un
+  `height` local, así que fijarlo a un número equivale a mentirle al scroll).
+  Solución: **no poner `height` ni `min-height` al `VerticalLayout`** — su
+  `min-height` automática es la suma de las cards y acierta sola. Las cards
+  miden **alto natural** y llevan `vertical-stretch: 0` (sin él, con pocos
+  resultados se estiran hasta llenar el Flickable). Antes había una estimación
+  en Rust (`errors-h`/`card_h()`, +30%): se eliminó porque en Windows se
+  quedaba corta (última card inalcanzable).
+- **GOTCHA `visible: false` en filas de botones**: el botón oculto **sigue
+  reservando su columna** del layout, así que los demás se encogen y el texto
+  sale elidido ("Añadir comen…"). Para no reservar, usar bloque `if`.
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en

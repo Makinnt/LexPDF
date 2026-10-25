@@ -23,7 +23,6 @@ struct ErrRow {
     count: int,
     is_group: bool,
     has_anno: bool,   // ya tiene resaltado+comentario (se puede borrar)
-    h: int,           // alto estimado de la card (lo pone Rust; slint#407)
 }
 
 struct NoteRow {
@@ -655,7 +654,6 @@ export component AppWindow inherits Window {
     in-out property <string> word-sample: "";
     in-out property <[ErrRow]> errors;
     // alto total estimado de las cards (Rust) + editor de comentario si está abierto
-    in-out property <int> errors-h: 0;
     // ubicación del aviso (toast): 0 = arriba (por defecto) · 1 = abajo
     in-out property <int> toast-pos: 0;
     in-out property <[NoteRow]> page-notes;
@@ -945,19 +943,16 @@ export component AppWindow inherits Window {
                 Flickable {
                     height: 420px;
                     visible: root.has-doc;
-                    // slint issue #407: Flickable + `for` no calcula el alto del
-                    // contenido; lo alimenta Rust (errors-h) y cada card lleva
-                    // su alto (h) para que el layout no reparta el hueco
+                    // slint#407: NO poner height/min-height al layout — el
+                    // content-height sale de su min-height AUTOMÁTICA (suma de
+                    // las cards). Fijarlo a un número desfasa el scroll.
                     VerticalLayout {
-                        // slint#407: el content-height del Flickable sale del
-                        // MIN-height del layout del viewport (no de height).
-                        // errors-h lleva margen: es suelo, no alto exacto.
-                        min-height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         spacing: 6px;
-                        // Cards a ALTO NATURAL (sin height fija): el padding y
-                        // los recortes del botón Borrar eran la estimación
-                        // desfasada en Windows.
+                        // Cards a ALTO NATURAL (sin height fija) y sin stretch:
+                        // si no, con pocos resultados se estiran hasta llenar
+                        // el Flickable.
                         for e[i] in root.errors: Rectangle {
+                            vertical-stretch: 0;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
@@ -999,10 +994,12 @@ export component AppWindow inherits Window {
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
                                         }
-                                        MiniBtn {
+                                        // `if` y no `visible`: con visible el
+                                        // botón oculto sigue reservando su
+                                        // columna y los demás salen cortados
+                                        if (e.has_anno): MiniBtn {
                                             label: "Borrar";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
-                                            visible: e.has_anno;
                                             clicked => { root.delete-anno(i); }
                                         }
                                     }
@@ -1132,14 +1129,19 @@ export component AppWindow inherits Window {
                     }
                     // resaltar texto libre (arrastrando un rectángulo)
                     Rectangle {
-                        width: 30px; height: 28px;
+                        width: 132px; height: 28px;
                         background: root.tool-mode == 2 ? root.c-accent : root.c-pill;
                         border-radius: 4px;
                         IconMarker {
                             width: 18px; height: 18px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                            x: 8px; y: (parent.height - self.height) / 2;
                             fill: root.tool-mode == 2 ? root.c-accent-fg : root.c-fg;
+                        }
+                        Text {
+                            text: "Añadir comentario"; font-size: 12px;
+                            color: root.tool-mode == 2 ? root.c-accent-fg : root.c-fg;
+                            x: 30px; y: (parent.height - self.height) / 2;
+                            vertical-alignment: center;
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { highlight-new(); } }
                     }
