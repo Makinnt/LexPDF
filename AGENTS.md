@@ -129,6 +129,9 @@ Flujos:
   trivial ahora porque `on_open_settings` ya no crea nada: solo rellena los
   props `p-*` y pone `ovl = 1`.
   Se guardan en `~/.config/lexpdf/settings.json` (0600).
+  **GOTCHA layout**: el contenido va en un `Flickable` y la fila
+  Guardar/Cerrar queda **fija al pie** (fuera del Flickable): si los botones
+  van dentro del contenido, con el panel corto se salen de la ventana.
 - **Capas apiladas Ajustes > Acerca de > Licencias** (todas DENTRO de la
   ventana principal): Slint 1.18 no tiene ventanas modales. AppWindow lleva
   `ovl` (0 nada · 1 Ajustes · 2 Acerca · 3 Licencias); cada capa es un `if
@@ -161,21 +164,24 @@ Flujos:
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.
-- **GOTCHA slint#407 (cards)**: `Flickable` + `for` NO computa
-  `content-height` (bug oficial de Slint). Las cards llevan `h` (alto
-  estimado en Rust con `card_h()`, estilo `license_height()`) y el
-  `Flickable` recibe el sumatorio en `errors-h` (+62 si el editor de
-  comentario está abierto); sin eso la lista no desliza y el layout reparte
-  el alto fijo como hueco muerto dentro de las cards.
+- **GOTCHA slint#407 (cards)**: en el pase `flickable.rs` del compilador,
+  `content-height` = `max(alto del Flickable, **min-height** del layout hijo)`
+  y los layouts con `for` directo quedan filtrados (`FIXME #407`). Por eso:
+  la lista es un `VerticalLayout` (no repetido) con **`min-height` explícito**
+  puesto desde Rust (`errors-h` +62 si el editor de comentario está abierto);
+  poner solo `height` **no** da scroll. Las cards miden **alto natural** (sin
+  `height` fija ni `e.h`): una altura estimada se desfasa con la fuente de
+  Windows y produce padding fantasma y botones recortados. `errors-h` va con
+  +30% de margen (`htot * 13 / 10`) porque es un **suelo**, no el alto exacto.
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
   las fuentes base de Windows y no se dibuja.
-- **Icono de ventana/corner**: Windows no lo pone del recurso del exe por
-  su cuenta (winit registra la clase con `hIcon: 0` y Slint no llama
-  `set_window_icon`): se pone con la propiedad nativa **`icon` del
-  `Window`** de Slint (`icon: @image-url(...)`; el backend winit llama
-  set_window_icon + set_taskbar_icon). El `.ico` de `winresource` en
+- **Icono de ventana/corner**: ya está en `AppWindow`:
+  `icon: @image-url("../assets/logo.png")` (el backend winit llama
+  set_window_icon + set_taskbar_icon). Windows no lo toma del recurso del exe
+  por su cuenta (winit registra la clase con `hIcon: 0`), así que **sin esa
+  propiedad la esquina sale en blanco**. El `.ico` de `winresource` en
   build.rs solo sirve para Explorer/accesos directos.
 - **GOTCHA `err_anno`**: el mapa error -> anotación guarda la **clave**
   (página + rect), NO el índice en `doc_notes`: al borrar una nota los índices
@@ -231,8 +237,10 @@ Flujos:
 - `Flickable + VerticalLayout + for` para la lista (no `ListView` de std-widgets).
 - Cards: franja de color por gravedad + palabra + tipo/gravedad/pág +
   descripción ES/EN + sugerencias LT (`No hay sugerencias` si vacío) +
-  Omitir/Restaurar (cascada por solape) + comentario + obs. gramatical
-  (editor inline) + 2 desplegables `DropSel` Tipo/Gravedad + grupo ×5+.
+  Omitir/Restaurar (cascada por solape) + "Añadir comentario" + obs. gramatical
+  (editor inline) + 2 desplegables `DropSel` Tipo/Gravedad + grupo ×5+
+  ("Desagrupar"/"Agrupar", `MiniBtn` con `width: 100px` y
+  `horizontal-stretch: 0`: al ser el único de su fila se estiraba entera).
 - Extracción = unión simple de boxes por carácter, sin shaping tipográfico.
 - No hay reemplazo de texto en el PDF (cirugía redact+reescribir, fuera del mínimo);
   las sugerencias son de referencia, como en `index.html`.
@@ -269,6 +277,11 @@ ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `
  sección Recientes → `open_doc`); `build.rs` descarga LT ~240MB a `assets/lt/`
  gitignoreado —requiere red en build y Java 17+ en runtime—; medido: arranque
 -`~4s, ~80ms/check, ~650MB RAM). `cargo test` rápido (sin motores pesados en tests).
+Release actual: **v0.2.5 marcada como prerelease "(experimental)"** (sin bump de
+versión): exe de Windows + AppImage. Los fixes visuales viven en `experimental`.
+Pendiente de validar en Windows: última card sin llegar a sus botones/editor,
+alto variable de cards y botones (texto cortado a "o…"), card única demasiado
+alta y leyenda "Añadir comentario" también en el resaltado libre.
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)
@@ -308,3 +321,20 @@ java en `$JAVA_BIN` → `jre\` junto al exe → `PATH`.
 Linux/AppImage: `installer/linux/` (`stage-appimage.sh` → AppDir + AppRun con
 `LT_HOME`/`JAVA_BIN`/`PDFIUM_DYNAMIC_LIB_PATH`); releases vía `release.yml`
 (con smoke test LT real y jlink incl. `jdk.httpserver`).
+
+**GOTCHA release (re-tag)**: re-pushear el mismo tag deja la release existente
+en **draft**, y el edit de `softprops/action-gh-release` falla contra ese
+estado (el job Linux muere en "Release con AppImage"; Windows pasa porque
+llega después). Por eso `release.yml` **borra la release previa**
+(`gh release delete "$GITHUB_REF_NAME" --yes || true`) antes de publicar.
+Ciclo experimental sin bump: `git push origin :refs/tags/vX` → `git tag -f` →
+push, y el paso de release lleva `prerelease: true` +
+`name: Release vX (experimental)`. Se **verifica por API** (no hay token para
+leer logs): `releases` debe traer los dos assets y `prerelease: true`.
+OJO: si borras el tag y no recreas la release, GitHub la deja en draft y no
+aparece en la página de Releases (ni como "Latest", por ser prerelease).
+
+**Ramas**: los fixes visuales se hacen en `experimental` (se re-etiqueta el
+mismo `vX`); `main` va **por detrás** a propósito (commit del fix + `git
+revert`, sin reescribir historia). No mover los fixes a `main` hasta que el
+usuario valide el exe.
