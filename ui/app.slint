@@ -953,6 +953,7 @@ export component AppWindow inherits Window {
                         // el Flickable.
                         for e[i] in root.errors: Rectangle {
                             vertical-stretch: 0;
+                            horizontal-stretch: 1;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
@@ -1007,12 +1008,14 @@ export component AppWindow inherits Window {
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
                                         }
-                                        // `if` y no `visible`: con visible el botón
-                                        // oculto sigue reservando su columna
-                                        if (e.has_anno): MiniBtn {
+                                        // siempre en la fila (un `if`/`visible`
+                                        // aquí deja medio hueco): si no hay
+                                        // anotación se ve apagado y no hace nada
+                                        MiniBtn {
                                             label: "Borrar";
+                                            opacity: e.has_anno ? 1 : 0.4;
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
-                                            clicked => { root.delete-anno(i); }
+                                            clicked => { if (e.has_anno) { root.delete-anno(i); } }
                                         }
                                     }
                                     HorizontalLayout {

@@ -180,11 +180,13 @@ Flujos:
   resultados se estiran hasta llenar el Flickable). Antes había una estimación
   en Rust (`errors-h`/`card_h()`, +30%): se eliminó porque en Windows se
   quedaba corta (última card inalcanzable).
-- **GOTCHA `visible: false` en filas de botones**: el botón oculto **sigue
-  reservando su columna** del layout, así que los demás se encogen y el texto
-  sale elidido ("Añadir comen…"). Para no reservar, usar bloque `if`. Y nada
-  de 3-4 `MiniBtn` en una fila del sidebar: máximo 2 (si no, se encogen igual);
-  la card usa dos filas (Omitir+Añadir comentario / Obs. gramatical+Borrar).
+- **GOTCHA botones de la card**: `visible: false` **y también un `if`** dejan
+  la columna reservada (el botón que queda se estira a medias → hueco raro) y
+  con 3-4 `MiniBtn` en una fila el layout los encoge y sale "Añadir comen…".
+  La card usa 2x2 fijo (Omitir+Añadir comentario / Obs. gramatical+Borrar) y
+  el "Borrar" sin anotación se pinta con `opacity: 0.4` y no hace nada.
+  La card lleva `horizontal-stretch: 1`: sin él su ancho es el del contenido y
+  cada card sale de un ancho distinto.
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
