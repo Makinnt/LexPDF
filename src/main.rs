@@ -182,10 +182,10 @@ fn kind_bar(sev: &str) -> slint::Color {
 
 fn desc_for(kind: &str, en: bool) -> &'static str {
     match (kind, en) {
-        ("Sintaxis", false) => "Posible error de sintaxis (LanguageTool)",
-        ("Sintaxis", true) => "Possible grammar issue (LanguageTool)",
-        (_, false) => "Posible falta de ortografía (LanguageTool)",
-        (_, true) => "Possible spelling mistake (LanguageTool)",
+        ("Sintaxis", false) => "Posible error de sintaxis",
+        ("Sintaxis", true) => "Possible grammar issue",
+        (_, false) => "Posible falta de ortografía",
+        (_, true) => "Possible spelling mistake",
     }
 }
 
@@ -1863,8 +1863,6 @@ fn main() -> anyhow::Result<()> {
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
-    // aviso de privacidad: el texto se revisa en local, no sale del PC
-    ui.set_popup_text("El texto de cada página se revisa con LanguageTool en este PC: no sale a Internet.".into());
     let (tx, rx) = channel::<SpellMsg>();
     let st = Rc::new(RefCell::new(State {
         pdfium: load_pdfium(),
@@ -1923,7 +1921,6 @@ fn main() -> anyhow::Result<()> {
                         st.borrow_mut().lt_ready = true;
                         st.borrow_mut().lt_child = child;
                         ui.set_lt_status("Motor: listo (local, sin red).".into());
-                        notify(&ui, &st, "Revisión lista (LanguageTool local).".into());
                     }
                     SpellEvent::LtFail(msg) => {
                         st.borrow_mut().lt_dead = true;

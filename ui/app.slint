@@ -975,8 +975,18 @@ export component AppWindow inherits Window {
                                         }
                                         TouchArea { width: parent.width; height: parent.height; clicked => { root.error-clicked(i); } }
                                     }
-                                    Text { text: e.desc; font-size: 13px; font-italic: true; color: root.c-dim; wrap: word-wrap; }
+                                    // alto fijo de 2 líneas: así todas las cards
+                                    // miden igual (y el min-height que calcula
+                                    // Slint sigue siendo exacto, no una estimación)
+                                    Text {
+                                        text: e.desc; font-size: 13px; font-italic: true; color: root.c-dim;
+                                        wrap: word-wrap; overflow: elide;
+                                        height: 34px; vertical-alignment: top;
+                                    }
                                     Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; }
+                                    // dos filas de 2 botones como mucho: con 3-4 en
+                                    // una sola fila el layout los encoge y el
+                                    // texto sale elidido ("Añadir comen…").
                                     HorizontalLayout {
                                         spacing: 4px;
                                         MiniBtn {
@@ -989,14 +999,16 @@ export component AppWindow inherits Window {
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.note-clicked(i); }
                                         }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
                                         MiniBtn {
                                             label: "Obs. gramatical";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
                                         }
-                                        // `if` y no `visible`: con visible el
-                                        // botón oculto sigue reservando su
-                                        // columna y los demás salen cortados
+                                        // `if` y no `visible`: con visible el botón
+                                        // oculto sigue reservando su columna
                                         if (e.has_anno): MiniBtn {
                                             label: "Borrar";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;

@@ -176,7 +176,9 @@ Flujos:
   quedaba corta (última card inalcanzable).
 - **GOTCHA `visible: false` en filas de botones**: el botón oculto **sigue
   reservando su columna** del layout, así que los demás se encogen y el texto
-  sale elidido ("Añadir comen…"). Para no reservar, usar bloque `if`.
+  sale elidido ("Añadir comen…"). Para no reservar, usar bloque `if`. Y nada
+  de 3-4 `MiniBtn` en una fila del sidebar: máximo 2 (si no, se encogen igual);
+  la card usa dos filas (Omitir+Añadir comentario / Obs. gramatical+Borrar).
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
