@@ -942,6 +942,9 @@ export component AppWindow inherits Window {
                 }
                 Flickable {
                     height: 420px;
+                    // sin esto el Flickable mide lo que su contenido (las cards)
+                    // y acaba antes que la fila Tipo/Gravedad
+                    horizontal-stretch: 1;
                     visible: root.has-doc;
                     // slint#407: NO poner height/min-height al layout — el
                     // content-height sale de su min-height AUTOMÁTICA (suma de

@@ -185,8 +185,9 @@ Flujos:
   con 3-4 `MiniBtn` en una fila el layout los encoge y sale "Añadir comen…".
   La card usa 2x2 fijo (Omitir+Añadir comentario / Obs. gramatical+Borrar) y
   el "Borrar" sin anotación se pinta con `opacity: 0.4` y no hace nada.
-  La card lleva `horizontal-stretch: 1`: sin él su ancho es el del contenido y
-  cada card sale de un ancho distinto.
+  La card lleva `horizontal-stretch: 1` y el **`Flickable` también**: sin
+  eso el ancho es el del contenido (cada card distinto, y la lista acaba
+  antes que la fila Tipo/Gravedad).
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
