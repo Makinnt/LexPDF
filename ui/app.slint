@@ -1141,7 +1141,7 @@ export component AppWindow inherits Window {
                     }
                     // resaltar texto libre (arrastrando un rectángulo)
                     Rectangle {
-                        width: 132px; height: 28px;
+                        width: 152px; height: 28px;
                         background: root.tool-mode == 2 ? root.c-accent : root.c-pill;
                         border-radius: 4px;
                         IconMarker {
@@ -1193,10 +1193,12 @@ export component AppWindow inherits Window {
                                 width: 58px; height: 28px;
                                 background: root.c-pill; border-radius: 4px;
                                 TextInput {
-                                    text: root.zoom-label;
+                                    // dos sentidos: al cambiar el zoom con rueda o
+                                    // lupas el campo muestra el valor real
+                                    text <=> root.zoom-label;
                                     color: root.c-fg; font-size: 12px;
                                     horizontal-alignment: center; vertical-alignment: center;
-                                    accepted => { root.zoom-text(self.text); }
+                                    accepted => { root.zoom-text(self.text); self.clear-focus(); }
                                 }
                             }
                             Rectangle {

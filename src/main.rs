@@ -1047,16 +1047,16 @@ struct LicInfo {
 fn license_entries() -> Vec<LicInfo> {
     vec![
         LicInfo { name: "LexPDF (esta app)", lic: "GPL-3.0-only", repo: "https://github.com/Makinnt/LexPDF", files: &["GPL3-LexPDF.txt"] },
-        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only (o licencia comercial de Slint)", repo: "https://github.com/slint-ui/slint", files: &["GPL3-Slint.txt"] },
+        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only", repo: "https://github.com/slint-ui/slint", files: &["GPL3-Slint.txt"] },
         LicInfo { name: "PDFium (motor de render)", lic: "BSD-3-Clause", repo: "https://github.com/pdfium/pdfium", files: &["BSD3-PDFium.txt"] },
-        LicInfo { name: "pdfium-render", lic: "MIT o Apache-2.0", repo: "https://github.com/ajrcarey/pdfium-render", files: &["MIT-pdfium-render.txt", "Apache2-pdfium-render.txt"] },
+        LicInfo { name: "pdfium-render", lic: "MIT", repo: "https://github.com/ajrcarey/pdfium-render", files: &["MIT-pdfium-render.txt"] },
         LicInfo { name: "LanguageTool (motor de revisión)", lic: "LGPL-2.1", repo: "https://github.com/languagetool-org/languagetool", files: &["LGPL21-LT.txt"] },
         LicInfo { name: "lopdf", lic: "MIT", repo: "https://github.com/J-F-Liu/lopdf", files: &["MIT-lopdf.txt"] },
-        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT o Apache-2.0", repo: "https://github.com/algesten/ureq", files: &["MIT-ureq.txt", "Apache2-ureq.txt"] },
-        LicInfo { name: "image", lic: "MIT o Apache-2.0", repo: "https://github.com/image-rs/image", files: &["MIT-image.txt", "Apache2-image.txt"] },
+        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT", repo: "https://github.com/algesten/ureq", files: &["MIT-ureq.txt"] },
+        LicInfo { name: "image", lic: "MIT", repo: "https://github.com/image-rs/image", files: &["MIT-image.txt"] },
         LicInfo { name: "rfd (diálogo de archivos)", lic: "MIT", repo: "https://github.com/PolyMeilex/rfd", files: &["MIT-rfd.txt"] },
-        LicInfo { name: "anyhow", lic: "MIT o Apache-2.0", repo: "https://github.com/dtolnay/anyhow", files: &["MIT-anyhow.txt", "Apache2-anyhow.txt"] },
-        LicInfo { name: "serde / serde_json", lic: "MIT o Apache-2.0", repo: "https://github.com/serde-rs/serde", files: &["MIT-serde.txt", "Apache2-serde.txt"] },
+        LicInfo { name: "anyhow", lic: "MIT", repo: "https://github.com/dtolnay/anyhow", files: &["MIT-anyhow.txt"] },
+        LicInfo { name: "serde / serde_json", lic: "MIT", repo: "https://github.com/serde-rs/serde", files: &["MIT-serde.txt"] },
         LicInfo { name: "Material Icons Outlined", lic: "Apache-2.0", repo: "https://github.com/google/material-design-icons", files: &["Apache2-icons.txt"] },
     ]
 }
@@ -2266,7 +2266,7 @@ fn main() -> anyhow::Result<()> {
             }
             ui.set_tool_mode(3);
             ui.set_free_note_on(false);
-            notify(&ui, &st, "Pincha en un marcador para borrarlo".into());
+            notify(&ui, &st, "Pincha un marcador para borrarlo · vuelve a pulsar el icono para salir".into());
         });
     }
     {

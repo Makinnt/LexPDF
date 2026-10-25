@@ -105,7 +105,11 @@ Flujos:
   palabra entera (1662 px) — medido contando píxeles. El test lo comprueba.
 - **Herramientas** (barra superior): 0 normal · 1 nota · 2 resaltar (arrastrar) ·
   3 borrar. El borrado se puede hacer desde la barra (pinchar el marcador) o
-  desde la card del error (botón "Borrar", solo si tiene anotación).
+  desde la card del error (botón "Borrar", solo si tiene anotación); el aviso
+  al entrar en modo borrar recuerda que se sale pulsando el icono otra vez.
+  El campo de zoom va con `text <=> root.zoom-label` (en un solo sentido se
+  queda con el texto viejo al cambiar el zoom con rueda o lupas) y hace
+  `clear-focus()` al aceptar.
   **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
   de la página, si no el scroll se come el arrastre del rectángulo.
   El resaltado libre puede ser **por área** (el rectángulo) o **por texto**
@@ -154,6 +158,8 @@ Flujos:
   `los_textos_de_licencia_son_los_correctos` + `every_listed_license_file_exists`
   lo garantizan) y el repo (clicable → `xdg-open`/`open`/`cmd start`). OJO con
   los repos reales: pdfium-render=ajrcarey, lopdf=J-F-Liu, rfd=PolyMeilex.
+  Donde la dependencia es dual (MIT **o** Apache-2.0) se **elige MIT** y se
+  lista solo ese texto: no vale dejar "MIT o Apache-2.0" sin elegir.
   Los datos los alimenta la función Rust `lic_select()` y el
   callback `open-licenses()` de AppWindow. `asset_file()` los busca junto al
   exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo
