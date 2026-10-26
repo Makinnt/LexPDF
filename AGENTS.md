@@ -185,9 +185,15 @@ Flujos:
   con 3-4 `MiniBtn` en una fila el layout los encoge y sale "Añadir comen…".
   La card usa 2x2 fijo (Omitir+Añadir comentario / Obs. gramatical+Borrar) y
   el "Borrar" sin anotación se pinta con `opacity: 0.4` y no hace nada.
-  La card lleva `horizontal-stretch: 1` y el **`Flickable` también**: sin
-  eso el ancho es el del contenido (cada card distinto, y la lista acaba
-  antes que la fila Tipo/Gravedad).
+  **GOTCHA ancho**: un layout dentro de un `Rectangle` NO hereda su ancho
+  (se queda en el preferido y TODO sale elidido: "Añadir come…", "…"). La
+  sidebar mide 400 fijos, así que la card va a **`width: 360px`**, el
+  `HorizontalLayout` de dentro a **360px** y el `VerticalLayout` a **355px**
+  (5px de la franja). Con `width: parent.width` + `Flickable` hay binding
+  loop (`content-width`), por eso son números.
+  Alturas con holgura para las fuentes de Windows: palabra 24px, meta 19px,
+  leyenda 36px (2 líneas), sugerencia 19px, `MiniBtn` 25px (con 22 se
+  cortaba la parte de arriba).
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
@@ -223,7 +229,10 @@ Flujos:
   imagen de la página (se mueve con el scroll) y aparece con
   `if (ta.has-hover)` (el `TouchArea` de la nota). Ojo: `has-hover` es del
   `TouchArea`, no del `Rectangle`; en Slint 1.18 no hay `MouseArea` ni
-  `pointer-event`.
+  `pointer-event`. El texto va **entero** (Rust ya no lo corta a 45 chars) y
+  el chip hace `wrap` a 340px con alto automático; su `x`/`y` se limitan al
+  área visible con `root.view-x`/`root.view-y`/`root.view-w`, si no se sale
+  de la ventana cuando la página es más ancha que el visor.
   **GOTCHA**: el `TouchArea` de esas zonas solo está activo en modo normal y
   borrar (`enabled: root.tool-mode == 0 || root.tool-mode == 3`): si está
   activo siempre, se come el arrastre del resaltado libre y el clic de la nota.

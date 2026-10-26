@@ -956,18 +956,19 @@ export component AppWindow inherits Window {
                         // el Flickable.
                         for e[i] in root.errors: Rectangle {
                             vertical-stretch: 0;
-                            horizontal-stretch: 1;
-                            max-width: 520px;
+                            width: 360px;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
                             background: root.c-card;
                             opacity: e.dimmed ? 0.45 : 1;
                             HorizontalLayout {
+                                width: 360px;
                                 spacing: 0;
                                 // franja de color por tipo, como index.html
                                 Rectangle { width: 5px; background: e.bar; }
                                 VerticalLayout {
+                                    width: 355px;
                                     padding: 6px;
                                     spacing: 3px;
                                     horizontal-stretch: 1;
@@ -1272,14 +1273,24 @@ export component AppWindow inherits Window {
                             // no se puede colocar: esto es un chip propio que
                             // se mueve con la pagina.
                             if (ta.has-hover): chip := Rectangle {
-                                x: 0px; y: -30px;
-                                width: max(60px, min(300px, chip-txt.width + 12px));
-                                height: 26px;
+                                // ancho fijo y wrap: el comentario largo se
+                                // lee entero (antes se cortaba)
+                                // dentro del area visible del visor (si la
+                                // pagina es mas ancha que la ventana, el
+                                // comentario se salia y se cortaba)
+                                x: max(root.view-x + 4px - n.x * 1px,
+                                       min(0px, root.view-x + root.view-w - n.x * 1px - self.width - 4px));
+                                // arriba; si la nota esta pegada al borde
+                                // superior visible, debajo
+                                y: n.y * 1px - root.view-y < chip-txt.height + 18px ? parent.height + 4px : -chip-txt.height - 14px;
+                                width: min(340px, root.img-w * 1px - 8px);
+                                height: chip-txt.height + 10px;
                                 background: #1b1b1be8; border-radius: 4px;
                                 border-width: 1px; border-color: #ffffff40;
                                 chip-txt := Text {
-                                    x: 6px; y: (parent.height - self.height) / 2;
+                                    x: 6px; y: 5px; width: parent.width - 12px;
                                     text: n.text; color: #ffffff; font-size: 12px;
+                                    wrap: word-wrap;
                                 }
                             }
                         }
