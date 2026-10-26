@@ -969,7 +969,7 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     padding: 6px;
                                     spacing: 3px;
-                                    horizontal-stretch: 1;
+                                    horizontal-stretch: 0;
                                     Rectangle {
                                         height: 20px;
                                         HorizontalLayout {
@@ -987,7 +987,7 @@ export component AppWindow inherits Window {
                                         wrap: word-wrap; overflow: elide;
                                         height: 34px; vertical-alignment: top;
                                     }
-                                    Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; }
+                                    Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; overflow: elide; height: 17px; }
                                     // dos filas de 2 botones como mucho: con 3-4 en
                                     // una sola fila el layout los encoge y el
                                     // texto sale elidido ("Añadir comen…").
