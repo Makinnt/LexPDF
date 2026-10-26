@@ -974,6 +974,7 @@ export component AppWindow inherits Window {
                                         height: 20px;
                                         HorizontalLayout {
                                             spacing: 6px;
+                                            horizontal-stretch: 1;
                                             Text { text: e.word; font-size: 14px; font-weight: 700; color: root.c-fg; vertical-alignment: center; }
                                             Text { text: e.kind + " · " + e.sev + " · pág " + (e.page + 1); font-size: 12px; color: root.c-dim; vertical-alignment: center; }
                                         }
