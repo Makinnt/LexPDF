@@ -184,7 +184,7 @@ fn desc_for(kind: &str, en: bool) -> &'static str {
     match (kind, en) {
         ("Sintaxis", false) => "Posible error de sintaxis",
         ("Sintaxis", true) => "Possible grammar issue",
-        (_, false) => "Posible falta de ortografía",
+        (_, false) => "Posible error de ortografía",
         (_, true) => "Possible spelling mistake",
     }
 }
@@ -520,7 +520,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
             let gsev = worst_sev(all.iter().filter(|x| x.word == e.word).map(|x| x.sev.as_str()));
             view.push(lead);
             view_group.push(Some(e.word.clone()));
-            let gdesc = "";
+            let gdesc = desc_for(&e.kind, en);
             let gsug = if sug.is_empty() {
                 (if en { "No suggestions" } else { "No hay sugerencias" }).to_string()
             } else {

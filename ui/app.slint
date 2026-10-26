@@ -976,17 +976,20 @@ export component AppWindow inherits Window {
                                             spacing: 6px;
                                             horizontal-stretch: 1;
                                             Text { text: e.word; font-size: 14px; font-weight: 700; color: root.c-fg; vertical-alignment: center; }
-                                            Text { text: e.kind + " · " + e.sev + " · pág " + (e.page + 1); font-size: 12px; color: root.c-dim; vertical-alignment: center; }
                                         }
                                         TouchArea { width: parent.width; height: parent.height; clicked => { root.error-clicked(i); } }
                                     }
-                                    // alto fijo de 2 líneas: así todas las cards
-                                    // miden igual (y el min-height que calcula
-                                    // Slint sigue siendo exacto, no una estimación)
+                                    // entre la palabra y la leyenda: tipo · gravedad · pág
+                                    Text {
+                                        text: e.kind + " · " + e.sev + " · pág " + (e.page + 1);
+                                        font-size: 12px; color: root.c-dim; height: 17px;
+                                        overflow: elide; vertical-alignment: center;
+                                    }
+                                    // leyenda: todas las cards la muestran
                                     Text {
                                         text: e.desc; font-size: 13px; font-italic: true; color: root.c-dim;
                                         wrap: word-wrap; overflow: elide;
-                                        height: 34px; vertical-alignment: top;
+                                        height: 17px; vertical-alignment: center;
                                     }
                                     Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; overflow: elide; height: 17px; }
                                     // dos filas de 2 botones como mucho: con 3-4 en
