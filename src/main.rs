@@ -520,11 +520,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
             let gsev = worst_sev(all.iter().filter(|x| x.word == e.word).map(|x| x.sev.as_str()));
             view.push(lead);
             view_group.push(Some(e.word.clone()));
-            let gdesc = if en {
-                format!("Repeated {n} times — comment/reject applies to all")
-            } else {
-                format!("Se repite {n} veces — comentar/rechazar aplica a todas")
-            };
+            let gdesc = "";
             let gsug = if sug.is_empty() {
                 (if en { "No suggestions" } else { "No hay sugerencias" }).to_string()
             } else {

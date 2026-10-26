@@ -992,6 +992,8 @@ export component AppWindow inherits Window {
                                     // una sola fila el layout los encoge y el
                                     // texto sale elidido ("Añadir comen…").
                                     HorizontalLayout {
+                                        width: 200px;
+                                        horizontal-stretch: 0;
                                         spacing: 4px;
                                         MiniBtn {
                                             label: e.dimmed ? "Restaurar" : "Omitir";
@@ -1005,6 +1007,8 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     HorizontalLayout {
+                                        width: 200px;
+                                        horizontal-stretch: 0;
                                         spacing: 4px;
                                         MiniBtn {
                                             label: "Obs. gramatical";
