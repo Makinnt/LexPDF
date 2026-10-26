@@ -524,7 +524,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
             let gsug = if sug.is_empty() {
                 (if en { "No suggestions" } else { "No hay sugerencias" }).to_string()
             } else {
-                format!("→ {} | {}", sug.join(", "), if en { "tap for pages" } else { "toca para ver páginas" })
+                format!("→ {}", sug.join(", "))
             };
             rows.push(ErrRow {
                 word: format!("{} (×{n})", e.word).into(),
