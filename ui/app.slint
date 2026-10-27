@@ -424,7 +424,7 @@ component SettingsPanel inherits Rectangle {
                 }
             }
             Rectangle {
-                height: 30px; border-radius: 4px;
+                height: 30px; width: 90px; border-radius: 4px;
                 background: Pal.c-fg;
                 Text {
                     text: "Guardar"; font-size: 13px; color: Pal.c-accent-fg;
@@ -1003,11 +1003,13 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 4px;
                                         MiniBtn {
+                                            width: 169px;
                                             label: e.dimmed ? "Restaurar" : "Omitir";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.omit-clicked(i); }
                                         }
                                         MiniBtn {
+                                            width: 169px;
                                             label: "Añadir comentario";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.note-clicked(i); }
@@ -1016,6 +1018,7 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 4px;
                                         MiniBtn {
+                                            width: 169px;
                                             label: "Obs. gramatical";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
@@ -1024,6 +1027,7 @@ export component AppWindow inherits Window {
                                         // aquí deja medio hueco): si no hay
                                         // anotación se ve apagado y no hace nada
                                         MiniBtn {
+                                            width: 169px;
                                             label: "Borrar";
                                             opacity: e.has_anno ? 1 : 0.4;
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
@@ -1033,10 +1037,11 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 4px;
                                         visible: e.count >= 5;
-                                        // ancho propio: si no, al ser el único del
-                                        // fila con stretch se come toda la card
+                                        // mismo tamaño que el grid 2x2 (la
+                                        // variante anterior a 100px se veía
+                                        // despareja junto a las otras filas)
                                         MiniBtn {
-                                            width: 100px;
+                                            width: 169px;
                                             horizontal-stretch: 0;
                                             label: e.is-group ? "Desagrupar (×" + e.count + ")" : "Agrupar (×" + e.count + ")";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
@@ -1075,11 +1080,13 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 4px;
                                             MiniBtn {
+                                                width: 169px;
                                                 label: "Guardar";
                                                 bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                                                 clicked => { root.save-note(i); }
                                             }
                                             MiniBtn {
+                                                width: 169px;
                                                 label: "Cancelar";
                                                 bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                                 clicked => { root.note-cancel(i); }

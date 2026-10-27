@@ -185,6 +185,12 @@ Flujos:
   con 3-4 `MiniBtn` en una fila el layout los encoge y sale "Añadir comen…".
   La card usa 2x2 fijo (Omitir+Añadir comentario / Obs. gramatical+Borrar) y
   el "Borrar" sin anotación se pinta con `opacity: 0.4` y no hace nada.
+  Todos los MiniBtn de la card (y el de Agrupar/Desagrupar) llevan
+  `width: 169px` (media card menos spacing): con solo `stretch: 1` el base es
+  el ancho PREFERIDO del texto y las columnas salían desiguales.
+  En el pie de Ajustes, "Guardar" necesita `width` explícito (90px): sin él,
+  el Rectangle se queda en su ancho preferido (~0, su Text usa parent.width)
+  y el botón salía aplastado.
   **GOTCHA ancho**: un layout dentro de un `Rectangle` NO hereda su ancho
   (se queda en el preferido y TODO sale elidido: "Añadir come…", "…"). La
   sidebar mide 400 fijos, así que la card va a **`width: 360px`**, el
