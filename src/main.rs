@@ -30,7 +30,7 @@ use std::{
 
 use anyhow::Context;
 use pdfium_render::prelude::*;
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode, VecModel};
+use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode, VecModel};
 
 slint::include_modules!();
 
@@ -55,10 +55,6 @@ struct State {
     path: Option<PathBuf>,               // el documento que abrió el usuario (historial)
     working: Option<PathBuf>,            // copia de trabajo "{nombre}_anotado.pdf"
     settings: Settings,                  // ajustes del usuario (ventana aparte)
-    // idx de all_errs -> (página, rect) de la anotación. OJO: no se guarda el
-    // índice de doc_notes porque al borrar una nota los demás se desplazan y
-    // el "Borrar" de la card acababa borrando la anotación equivocada.
-    err_anno: HashMap<usize, (u32, [f32; 4])>,
     free_rects: Option<(u32, Vec<[f32; 4]>)>, // resaltado libre pendiente: pág + rects
     password: Option<&'static str>,      // solo en memoria, nunca en disco
     dlg_pending: Option<Pending>,        // acción pendiente de un diálogo
@@ -81,15 +77,16 @@ struct State {
     popup_until: Option<std::time::Instant>, // toast visible hasta este instante
     zoom: f32,                               // 0.5 = ~700px de ancho (cabe); pasos ×1.25
     free_pt: Option<(u32, f32, f32)>, // nota libre pendiente: (página, x, y en puntos PDF)
-    lt_ready: bool, // sidecar LanguageTool respondiendo en localhost:8081
-    lt_dead: bool,  // LT no va a arrancar (sin java): el scan avanza sin sintaxis
-    pending: u32, // hilos HTTP en vuelo (la barra sigue hasta que vuelven)
-    jobs_total: u32, // hilos lanzados en este scan (tramo 50→100 de la barra)
+    lt_ready: bool, // sidecar LanguageTool respondiendo en loopback
+    lt_dead: bool,  // LT no va a arrancar (sin java / motor apagado): el scan avanza sin sintaxis
+    lt_spawned: bool, // ya hay un hilo intentando arrancar el sidecar (evita duplicados)
+    pending: u32, // trabajos LT en vuelo (la barra sigue hasta que vuelven)
+    jobs_total: u32, // trabajos lanzados en este scan (tramo 50→100 de la barra)
     boot_start: std::time::Instant, // arranque del motor (relleno temporal 0→99)
-    sec_bytes: u64, // texto enviado al motor (métrica: siempre loopback)
     syn_received: bool, // llegó al menos un Syn (si no, "LT no devolvió ninguno")
     lt_child: Option<std::process::Child>, // hijo java propio
-    tx: Sender<SpellMsg>,
+    tx: Sender<SpellEvent>,
+    job_tx: Sender<SpellJob>,
     last_lang: i32,
 }
 
@@ -191,11 +188,14 @@ fn desc_for(kind: &str, en: bool) -> &'static str {
 }
 
 enum SpellEvent {
-    LtReady(Option<std::process::Child>), // hijo java propio
+    LtReady(std::process::Child), // hijo java propio
     LtFail(String), // java ausente o LT no arranca: sin revisión hasta que haya servidor
     Syn(u64, Vec<Misspelling>), // (gen, hallazgos LT de una página: ortografía + sintaxis)
 }
-type SpellMsg = SpellEvent;
+
+/// Una página a revisar: palabras, página, idioma, generación del scan y canal
+/// de respuesta. Los hilos trabajadores (4 fijos) las consumen de una cola.
+type SpellJob = (Vec<Word>, u32, &'static str, u64, Sender<SpellEvent>);
 
 /// Qué `java` usar: $JAVA_BIN → `jre\bin\java.exe` junto al exe (instalador
 /// Windows) → `java` del PATH. Devuelve el comando listo para Command.
@@ -405,31 +405,20 @@ fn span_to_box(words: &[Word], ranges: &[std::ops::Range<usize>], bs: usize, be:
 
 /// Pasa LanguageTool sobre el texto de una página y devuelve TODOS los
 /// hallazgos (ortografía si categoría TYPOS, sintaxis el resto).
-/// Corre en hilo fondo (HTTP sync); nunca en el Timer.
-/// mode: 0 auto (es+en sin solapes), 1 es, 2 en.
-fn syntax_page(words: &[Word], page: u32, mode: i32) -> Vec<Misspelling> {
+/// Corre en los hilos trabajadores (HTTP sync); nunca en el Timer.
+fn syntax_page(words: &[Word], page: u32, lang: &str) -> Vec<Misspelling> {
     let (text, ranges) = join_words(words);
     if text.is_empty() {
         return vec![];
     }
-    let langs: &[&str] = match mode {
-        1 => &["es-ES"],
-        2 => &["en-US"],
-        _ => &["es-ES", "en-US"],
-    };
-    // (char_start, char_end, sugs, categoría); en auto el primer idioma que marca gana el solape
+    let total_chars = text.chars().count();
     let mut spans: Vec<(usize, usize, Vec<String>, String)> = vec![];
-    for lang in langs {
-        for (o, l, rep, cat) in lt_check(&text, lang) {
-            let be = o + l;
-            if be > text.chars().count() {
-                continue;
-            }
-            if spans.iter().any(|(a, b, _, _)| *a < be && o < *b) {
-                continue;
-            }
-            spans.push((o, be, rep, cat));
+    for (o, l, rep, cat) in lt_check(&text, lang) {
+        let be = o + l;
+        if be > total_chars {
+            continue;
         }
+        spans.push((o, be, rep, cat));
     }
     spans.sort_by_key(|(bs, _, _, _)| *bs);
     let mut out = vec![];
@@ -469,11 +458,27 @@ fn err_order(a: &Misspelling, b: &Misspelling) -> std::cmp::Ordering {
         .then(a.x0.total_cmp(&b.x0))
 }
 
+/// Rect de la anotación Highlight de un hallazgo, si ya existe. Se busca por
+/// página + rect (no por índice, que se reusa al reescanear o abrir otro PDF).
+fn anno_rect(notes: &[DocNote], e: &Misspelling) -> Option<[f32; 4]> {
+    notes
+        .iter()
+        .find(|n| {
+            n.kind == AnnoKind::Highlight
+                && n.page == e.page
+                && (n.x0 - e.x0).abs() < 0.5
+                && (n.y0 - e.y0).abs() < 0.5
+                && (n.x1 - e.x1).abs() < 0.5
+                && (n.y1 - e.y1).abs() < 0.5
+        })
+        .map(|n| [n.x0, n.y0, n.x1, n.y1])
+}
+
 fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
     let en = ui.get_lang_idx() == 1;
-    let (all, expanded, err_anno) = {
+    let (all, expanded, doc_notes) = {
         let s = st.borrow();
-        (s.all_errs.clone(), s.expanded.clone(), s.err_anno.clone())
+        (s.all_errs.clone(), s.expanded.clone(), s.doc_notes.clone())
     };
     // índices filtrados en orden de aparición
     // tipo: 0 todas · 1 ortografía · 2 sintaxis | sev: 0 todas · 1 grave · 2 intermedia · 3 mínima
@@ -538,7 +543,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 desc: gdesc.clone().into(),
                 count: n as i32,
                 is_group: true,
-                has_anno: all.iter().enumerate().any(|(k, x)| x.word == e.word && err_anno.contains_key(&k)),
+                has_anno: all.iter().filter(|x| x.word == e.word).any(|x| anno_rect(&doc_notes, x).is_some()),
             });
         } else {
             view.push(gi);
@@ -558,7 +563,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 desc: desc_for(&e.kind, en).into(),
                 count: n as i32,
                 is_group: false,
-                has_anno: err_anno.contains_key(&gi),
+                has_anno: anno_rect(&doc_notes, e).is_some(),
             });
         }
     }
@@ -581,10 +586,6 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
     }
     let graves = all.iter().filter(|e| e.sev == "grave").count();
     ui.set_spell_status(format!("{} errores ({} grave)", rows.len(), graves).into());
-    let s = st.borrow();
-    if s.lt_ready {
-        ui.set_lt_status(sec_line(s.sec_bytes / 1024).into());
-    }
 }
 
 /// Prepara el escaneo TODO el documento; el Timer lo avanza por trozos.
@@ -603,7 +604,6 @@ fn start_scan(ui: &AppWindow, st: &mut State) {
     st.scan_pos = 0;
     st.pending = 0;
     st.jobs_total = 0;
-    st.sec_bytes = 0;
     st.last_lang = ui.get_lang_idx();
     ui.set_errors(ModelRc::new(VecModel::from_slice(&[])));
     ui.set_scanning(true);
@@ -612,9 +612,9 @@ fn start_scan(ui: &AppWindow, st: &mut State) {
     ui.set_spell_status("…".into());
 }
 
-/// Avanza la extracción con presupuesto de 80ms por tick y lanza el chequeo
-/// LT en fondo (un hilo por página, solo HTTP). Sin servidor no avanza:
-/// sin motor no hay nada que mostrar.
+/// Avanza la extracción con presupuesto de 80ms por tick y encola el chequeo
+/// LT (4 hilos trabajadores fijos sacan las páginas de la cola). Sin servidor
+/// no avanza: sin motor no hay nada que mostrar.
 /// Devuelve true si llegaron hits de la página visible (hay que re-subrayar).
 fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     {
@@ -644,42 +644,32 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
     // sin LT solo queda esperar al sidecar; no se consume cola para no perder páginas.
     // Si LT murió (lt_dead), se consume igual para que la barra termine (lista vacía).
     let dead = st.borrow().lt_dead;
-    let mode = ui.get_lang_idx() + 1; // UI 0=ES,1=EN → LT 1=es,2=en
+    let lang = if ui.get_lang_idx() == 1 { "en-US" } else { "es-ES" }; // UI 0=ES,1=EN
     let t = std::time::Instant::now();
-    let mut jobs: Vec<(Vec<Word>, u32, i32, u64, Sender<SpellMsg>)> = vec![];
+    let mut launched = 0u32;
     {
         let mut s = st.borrow_mut();
         while s.scan_pos < s.scan_queue.len() && t.elapsed() < std::time::Duration::from_millis(80) {
             let i = s.scan_queue[s.scan_pos];
             s.scan_pos += 1;
-            // el doc sigue abierto: no se reabre por página (solo se renderiza)
-            let words = match s.doc.as_ref() {
-                Some(doc) => match doc.pages().get(i as u16) {
-                    Ok(pg) => extract_words(&pg),
-                    Err(_) => vec![],
-                },
-                None => vec![],
-            };
             if !dead {
-                jobs.push((words, i, mode, s.scan_id, s.tx.clone()));
+                // el doc sigue abierto: no se reabre por página (solo se extrae)
+                let words = match s.doc.as_ref() {
+                    Some(doc) => match doc.pages().get(i as u16) {
+                        Ok(pg) => extract_words(&pg),
+                        Err(_) => vec![],
+                    },
+                    None => vec![],
+                };
+                let _ = s.job_tx.send((words, i, lang, s.scan_id, s.tx.clone()));
+                launched += 1;
             }
         }
+        s.pending += launched;
+        s.jobs_total += launched;
         refresh_progress(ui, &s);
     }
-    let launched = !jobs.is_empty();
-    if launched {
-        st.borrow_mut().pending += jobs.len() as u32;
-        st.borrow_mut().jobs_total += jobs.len() as u32;
-        st.borrow_mut().sec_bytes += jobs.iter().map(|(w, _, _, _, _)| w.iter().map(|x| x.text.len() as u64).sum::<u64>()).sum::<u64>();
-    }
-    for (words, pg, mode, gen, tx) in jobs {
-        std::thread::spawn(move || {
-            let hits = syntax_page(&words, pg, mode);
-            // siempre responde (aunque vacío) para cerrar el pendiente
-            let _ = tx.send(SpellEvent::Syn(gen, hits));
-        });
-    }
-    if launched {
+    if launched > 0 {
         push_errs(ui, st);
     }
     false
@@ -839,11 +829,6 @@ fn save_doc(doc: &PdfDocument, out: &PathBuf) -> anyhow::Result<()> {
     r
 }
 
-/// Métrica visible: KB de texto revisado (siempre en loopback, ver tripwire).
-fn sec_line(kb: u64) -> String {
-    format!("Motor: listo (local, sin red · {kb} KB revisados sin salir del PC).")
-}
-
 /// Lee las sticky-notes (Text) ya existentes en un fichero (solo tests).
 #[cfg(test)]
 fn read_notes(pdfium: &Pdfium, path: &PathBuf) -> Vec<DocNote> {
@@ -973,6 +958,7 @@ fn push_history(ui: &AppWindow) {
             HisRow {
                 name,
                 info: format!("{} págs · {} errores · {} notas · {}%", e.pages, e.errors, e.notes, pct).into(),
+                path: e.path.clone().into(),
             }
         })
         .collect();
@@ -1209,15 +1195,6 @@ fn lget(o: &lopdf::Object, key: &[u8]) -> Option<lopdf::Object> {
     }
 }
 
-/// ¿Los dos rects son el mismo (con margen)?
-fn same_rect(a: &[f32], b: &[f32; 4]) -> bool {
-    a.len() == 4
-        && (a[0] - b[0]).abs() < 0.5
-        && (a[1] - b[1]).abs() < 0.5
-        && (a[2] - b[2]).abs() < 0.5
-        && (a[3] - b[3]).abs() < 0.5
-}
-
 /// Solo PDFs: extensión + magia `%PDF-` (la extensión sola se falsifica
 /// renombrando; el filtro del diálogo no cubre argv ni historial).
 /// Puro y testeable.
@@ -1260,6 +1237,10 @@ fn open_doc(ui: &AppWindow, st: &Rc<RefCell<State>>, path: PathBuf) {
         s.flash = None;
         s.free_pt = None;
     }
+    // de aquí en adelante el visor anterior ya no vale: si algo falla (contraseña
+    // cancelada, PDF corrupto) se ve "Sin documento", no una página huérfana.
+    ui.set_has_doc(false);
+    ui.set_scanning(false);
     ui.set_has_working(st.borrow().working.is_some());
     let src = st.borrow().render_from().unwrap_or_else(|| path.clone());
     let abierto = with_state(st, |s| open_doc_file(s, &src));
@@ -1350,8 +1331,6 @@ enum NoteResult {
 }
 
 /// Aplica una anotación y la deja visible al momento. Si no hay copia de
-
-/// Aplica una anotación y la deja visible al momento. Si no hay copia de
 /// trabajo, se pregunta antes de crearla (y se devuelve `Pending`).
 fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> NoteResult {
     if st.borrow().working.is_none() {
@@ -1367,24 +1346,8 @@ fn apply_note(ui: &AppWindow, st: &Rc<RefCell<State>>, req: AnnotateReq) -> Note
     let res = with_state(st, |s| annotate_open(s, &req));
     match res {
         Ok(added) => {
-            {
-                // se apunta qué anotación corresponde a qué error (para "Borrar")
-                let mut s = st.borrow_mut();
-                let first = s.doc_notes.len();
-                s.doc_notes.extend(added);
-                if let AnnotateReq::Highlight(idxs, _) = req {
-                    let claves: Vec<(usize, u32, [f32; 4])> = idxs
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(k, gi)| {
-                            s.doc_notes.get(first + k).map(|n| (*gi, n.page, [n.x0, n.y0, n.x1, n.y1]))
-                        })
-                        .collect();
-                    for (gi, page, rect) in claves {
-                        s.err_anno.insert(gi, (page, rect));
-                    }
-                }
-            }
+            // la card sabe que ya tiene anotación mirando doc_notes (página + rect)
+            st.borrow_mut().doc_notes.extend(added);
             let pg = st.borrow().page;
             show(ui, &mut st.borrow_mut(), pg); // la nota se ve al momento
             push_page_notes(ui, &st.borrow());
@@ -1623,12 +1586,8 @@ fn hl_color(mode: u8, kind: &str) -> PdfColor {
     }
 }
 
-/// Borra una anotación del PDF (y la quita de la lista en memoria).
-/// Borra **todas** las anotaciones que correspondan a esa nota (si el usuario
-/// comenta la misma palabra dos veces, se borran las dos y no queda ningún
-/// resaltado suelto).
-/// Borra las anotaciones de una página que están en ese rectángulo (las que
-/// sean: si el usuario comenta la misma palabra dos veces, se van las dos y no
+/// Borra **todas** las anotaciones de una página que estén en ese rectángulo
+/// (si el usuario comenta la misma palabra dos veces, se van las dos y no
 /// queda ningún resaltado suelto).
 fn delete_annos_at(st: &mut State, page: u32, rect: [f32; 4], kind: AnnoKind) -> anyhow::Result<usize> {
     let out = st.working.clone().context("sin copia de trabajo")?;
@@ -1768,8 +1727,6 @@ fn show(ui: &AppWindow, st: &mut State, page: u32) {
             ui.set_has_doc(true);
             ui.set_page_label(format!("Pág {} de {}", page + 1, total).into());
             ui.set_word_count(words.len() as i32);
-            let sample: Vec<&str> = words.iter().take(12).map(|w| w.text.as_str()).collect();
-            ui.set_word_sample(sample.join(" ").into());
             ui.set_status(format!("{} — {} págs. · {} palabras en pág. {}", path.display(), total, words.len(), page + 1).into());
             ui.set_img_w(iw as i32);
             ui.set_img_h(ih as i32);
@@ -1849,6 +1806,88 @@ fn bind_pdfium() -> Pdfium {
     Pdfium::default()
 }
 
+/// Arranca el sidecar LanguageTool: SOLO el hijo propio, en un puerto libre
+/// elegido al arrancar (así ningún proceso ajeno puede interceptar el texto) y
+/// con el JVM encerrado: cualquier salida HTTP del LT va a un puerto muerto.
+/// ponytail: el Child viaja por el canal al hilo UI; los hilos de página solo hacen HTTP
+/// Idempotente: si ya hay un hilo arrancándolo, no se lanza otro.
+fn start_lt(st: &Rc<RefCell<State>>) {
+    let tx = {
+        let mut s = st.borrow_mut();
+        // con el motor desactivado (ajustes) no se arranca nada: el texto no
+        // sale del proceso y no hay revisión
+        if !s.settings.motor || s.lt_spawned {
+            s.lt_dead = !s.settings.motor;
+            return;
+        }
+        s.lt_spawned = true;
+        s.lt_dead = false;
+        s.tx.clone()
+    };
+    std::thread::spawn(move || {
+        let Some(dir) = lt_dir() else {
+            let _ = tx.send(SpellEvent::LtFail("no se encontró assets/lt (¿falló la descarga en build?)".into()));
+            return;
+        };
+        let jar = dir.join("languagetool-server.jar");
+        // hasta 3 intentos: si el puerto elegido lo captura alguien, otro
+        for _intento in 0..3 {
+        // puerto libre en loopback para este hijo
+        let port = free_port();
+        LT_PORT.store(port, std::sync::atomic::Ordering::Relaxed);
+        let mut cmd = java_cmd();
+        #[cfg(windows)]
+        {
+            // sin ventana de consola del hijo Java en Windows
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let child = cmd
+            .args(["-Xms256m", "-Xmx1g", "-Dfile.encoding=UTF-8"])
+            // encerrado: el proxy del JVM apunta a un puerto muerto, así que
+            // el LT no puede salir a Internet (loopback queda directo)
+            .args(["-Dhttp.proxyHost=127.0.0.1", "-Dhttp.proxyPort=1"])
+            .args(["-Dhttps.proxyHost=127.0.0.1", "-Dhttps.proxyPort=1"])
+            .args(["-Dhttp.nonProxyHosts=127.0.0.1|localhost|[::1]"])
+            .args(["-cp"])
+            .arg(&jar)
+            .arg("org.languagetool.server.HTTPServer")
+            .args(["--port", &port.to_string()])
+            .current_dir(&dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        let mut child = match child {
+            Ok(c) => c,
+            Err(_) => {
+                let _ = tx.send(SpellEvent::LtFail("java no encontrado (se necesita Java 17+)".into()));
+                return;
+            }
+        };
+        // espera hasta 90s a que caliente reglas
+        let mut ok = false;
+        for _ in 0..45 {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if lt_alive() {
+                ok = true;
+                break;
+            }
+            // si el hijo murió, no tiene sentido seguir esperando
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                _ => {}
+            }
+        }
+        if ok {
+            let _ = tx.send(SpellEvent::LtReady(child));
+            return;
+        }
+        let _ = child.kill();
+        } // fin de los intentos
+        let _ = tx.send(SpellEvent::LtFail("el servidor LT no respondió a tiempo".into()));
+    });
+}
+
 fn main() -> anyhow::Result<()> {
     let ui = AppWindow::new()?;
     ui.set_version(env!("CARGO_PKG_VERSION").into());
@@ -1856,7 +1895,24 @@ fn main() -> anyhow::Result<()> {
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
-    let (tx, rx) = channel::<SpellMsg>();
+    let (tx, rx) = channel::<SpellEvent>();
+    // 4 hilos trabajadores fijos: sacan páginas de la cola y hablan con el
+    // sidecar (HTTP sync). Así un PDF de 1.000 páginas no deja 1.000 hilos.
+    let (job_tx, job_rx) = channel::<SpellJob>();
+    let job_rx = std::sync::Arc::new(std::sync::Mutex::new(job_rx));
+    for _ in 0..4 {
+        let job_rx = job_rx.clone();
+        std::thread::spawn(move || loop {
+            let job = match job_rx.lock() {
+                Ok(g) => g.recv(),
+                Err(_) => return,
+            };
+            let Ok((words, pg, lang, gen, tx)) = job else { return };
+            let hits = syntax_page(&words, pg, lang);
+            // siempre responde (aunque vacío) para cerrar el pendiente
+            let _ = tx.send(SpellEvent::Syn(gen, hits));
+        });
+    }
     let st = Rc::new(RefCell::new(State {
         pdfium: load_pdfium(),
         doc: None,
@@ -1865,7 +1921,6 @@ fn main() -> anyhow::Result<()> {
         path: None,
         working: None,
         settings: load_settings(),
-        err_anno: HashMap::new(),
         free_rects: None,
         password: None,
         dlg_pending: None,
@@ -1889,11 +1944,13 @@ fn main() -> anyhow::Result<()> {
         zoom: 0.5,
         free_pt: None,
         lt_ready: false,
-        pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
+        pending: 0, jobs_total: 0, boot_start: std::time::Instant::now(),
         syn_received: false,
         lt_dead: false,
         lt_child: None,
+        lt_spawned: false,
         tx,
+        job_tx,
         last_lang: 0,
     }));
 
@@ -1912,12 +1969,10 @@ fn main() -> anyhow::Result<()> {
                 match msg {
                     SpellEvent::LtReady(child) => {
                         st.borrow_mut().lt_ready = true;
-                        st.borrow_mut().lt_child = child;
-                        ui.set_lt_status("Motor: listo (local, sin red).".into());
+                        st.borrow_mut().lt_child = Some(child);
                     }
                     SpellEvent::LtFail(msg) => {
                         st.borrow_mut().lt_dead = true;
-                        ui.set_lt_status(format!("Motor: no disponible ({msg}).").into());
                         notify(&ui, &st, format!("Sin revisión: {msg}."));
                     }
                     SpellEvent::Syn(gen, hits) => {
@@ -2041,7 +2096,7 @@ fn main() -> anyhow::Result<()> {
         let st = st.clone();
         ui.on_zoom_text(move |t| {
             let Some(ui) = ui_weak.upgrade() else { return };
-            // acepta "150", "150%" o "1.5x": número inicial = porcentaje
+            // acepta "150" o "150%": el número inicial es el porcentaje (1.5 = 1.5%, no ×1.5)
             let num: String = t.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == ',').collect();
             if let Ok(v) = num.replace(',', ".").parse::<f32>() {
                 if v.is_finite() {
@@ -2274,7 +2329,6 @@ fn main() -> anyhow::Result<()> {
                     let pg = st.borrow().page;
                     show(&ui, &mut st.borrow_mut(), pg);
                     push_page_notes(&ui, &st.borrow());
-                    st.borrow_mut().err_anno.clear();
                     push_errs(&ui, &st);
                     notify(&ui, &st, "Anotación borrada".into());
                 }
@@ -2301,11 +2355,15 @@ fn main() -> anyhow::Result<()> {
                     Some(w) => s
                         .all_errs
                         .iter()
-                        .enumerate()
-                        .filter(|(_, e)| &e.word == w)
-                        .filter_map(|(k, _)| s.err_anno.get(&k).copied())
+                        .filter(|e| &e.word == w)
+                        .filter_map(|e| anno_rect(&s.doc_notes, e).map(|r| (e.page, r)))
                         .collect(),
-                    None => s.err_anno.get(&gi).copied().into_iter().collect(),
+                    None => s
+                        .all_errs
+                        .get(gi)
+                        .and_then(|e| anno_rect(&s.doc_notes, e).map(|r| (e.page, r)))
+                        .into_iter()
+                        .collect(),
                 }
             };
             if targets.is_empty() {
@@ -2319,7 +2377,6 @@ fn main() -> anyhow::Result<()> {
                     notify(&ui, &st, format!("No se pudo borrar: {e:#}"));
                 }
             }
-            st.borrow_mut().err_anno.clear();
             let pg = st.borrow().page;
             show(&ui, &mut st.borrow_mut(), pg);
             push_page_notes(&ui, &st.borrow());
@@ -2380,7 +2437,26 @@ fn main() -> anyhow::Result<()> {
             {
                 let mut stt = apply_st.borrow_mut();
                 stt.settings = s2;
-                stt.lt_dead = !s2.motor;
+                if s2.motor {
+                    stt.lt_dead = false;
+                } else {
+                    // motor apagado: se mata el sidecar para que no quede vivo
+                    stt.lt_dead = true;
+                    stt.lt_ready = false;
+                    stt.lt_spawned = false;
+                    if let Some(mut c) = stt.lt_child.take() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                }
+            }
+            // re-encender el motor tiene que volver a arrancar el sidecar (si no,
+            // la barra se queda en "Cargando diccionarios…" para siempre)
+            if s2.motor && !apply_st.borrow().lt_ready {
+                start_lt(&apply_st);
+                if apply_st.borrow().path.is_some() {
+                    start_scan(&ui, &mut apply_st.borrow_mut());
+                }
             }
             ui.set_set_hl_color(hl);
             ui.set_set_copy_mode(copy);
@@ -2720,7 +2796,12 @@ fn main() -> anyhow::Result<()> {
         let st = st.clone();
         ui.on_history_open(move |i| {
             let Some(ui) = ui_weak.upgrade() else { return };
-            let path = load_history().get(i as usize).map(|e| PathBuf::from(&e.path));
+            // la ruta viaja en la propia fila: recargar el historial desplazaba
+            // los índices si un fichero había desaparecido y abría otro documento
+            let path = ui
+                .get_history()
+                .row_data(i as usize)
+                .map(|r| PathBuf::from(r.path.as_str()));
             match path {
                 Some(p) if p.is_file() => open_doc(&ui, &st, p),
                 _ => notify(&ui, &st, "Ese archivo ya no existe.".into()),
@@ -2766,82 +2847,7 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // sidecar LanguageTool: SOLO el hijo propio, en un puerto libre elegido al
-    // arrancar (así ningún proceso ajeno puede interceptar el texto) y con el
-    // JVM encerrado: cualquier salida HTTP del LT va a un puerto muerto.
-    // ponytail: el Child viaja por el canal al hilo UI; los hilos de página solo hacen HTTP
-    {
-        let tx = st.borrow().tx.clone();
-        // con el motor desactivado (ajustes) no se arranca nada: el texto no
-        // sale del proceso y no hay revisión
-        if !st.borrow().settings.motor {
-            st.borrow_mut().lt_dead = true;
-            ui.set_lt_status("Motor desactivado (no se envía texto a ningún proceso).".into());
-        } else {
-        std::thread::spawn(move || {
-            let Some(dir) = lt_dir() else {
-                let _ = tx.send(SpellEvent::LtFail("no se encontró assets/lt (¿falló la descarga en build?)".into()));
-                return;
-            };
-            let jar = dir.join("languagetool-server.jar");
-            // hasta 3 intentos: si el puerto elegido lo captura alguien, otro
-            for _intento in 0..3 {
-            // puerto libre en loopback para este hijo
-            let port = free_port();
-            LT_PORT.store(port, std::sync::atomic::Ordering::Relaxed);
-            let mut cmd = java_cmd();
-            #[cfg(windows)]
-            {
-                // sin ventana de consola del hijo Java en Windows
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-            }
-            let child = cmd
-                .args(["-Xms256m", "-Xmx1g", "-Dfile.encoding=UTF-8"])
-                // encerrado: el proxy del JVM apunta a un puerto muerto, así que
-                // el LT no puede salir a Internet (loopback queda directo)
-                .args(["-Dhttp.proxyHost=127.0.0.1", "-Dhttp.proxyPort=1"])
-                .args(["-Dhttps.proxyHost=127.0.0.1", "-Dhttps.proxyPort=1"])
-                .args(["-Dhttp.nonProxyHosts=127.0.0.1|localhost|[::1]"])
-                .args(["-cp"])
-                .arg(&jar)
-                .arg("org.languagetool.server.HTTPServer")
-                .args(["--port", &port.to_string()])
-                .current_dir(&dir)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
-            let mut child = match child {
-                Ok(c) => c,
-                Err(_) => {
-                    let _ = tx.send(SpellEvent::LtFail("java no encontrado (se necesita Java 17+)".into()));
-                    return;
-                }
-            };
-            // espera hasta 90s a que caliente reglas
-            let mut ok = false;
-            for _ in 0..45 {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                if lt_alive() {
-                    ok = true;
-                    break;
-                }
-                // si el hijo murió, no tiene sentido seguir esperando
-                match child.try_wait() {
-                    Ok(Some(_)) => break,
-                    _ => {}
-                }
-            }
-            if ok {
-                let _ = tx.send(SpellEvent::LtReady(Some(child)));
-                return;
-            }
-            let _ = child.kill();
-            } // fin de los intentos
-            let _ = tx.send(SpellEvent::LtFail("el servidor LT no respondió a tiempo".into()));
-        });
-        }
-    }
+    start_lt(&st);
 
     // ponytail: abrir por argv evita el diálogo para pruebas/demos; quitar si molesta
     if let Some(arg) = std::env::args().nth(1) {
@@ -2880,6 +2886,25 @@ mod tests {
         assert!((x - 100.0).abs() < 0.01 && (w - 200.0).abs() < 0.01);
         assert!((y - 1600.0).abs() < 0.01 && (h - 200.0).abs() < 0.01);
     }
+    /// La presencia de anotación se busca por página + rect (no por índice de
+    /// error, que se reusa al reescanear) y no confunde nota con resaltado.
+    #[test]
+    fn anno_se_busca_por_pagina_y_rect() {
+        let e = Misspelling {
+            word: "x".into(), sug: vec![], page: 3,
+            x0: 10.0, y0: 20.0, x1: 30.0, y1: 40.0,
+            dismissed: false, kind: "Ortografía".into(), sev: "intermedia".into(),
+        };
+        let note = |page, kind, x0: f32, y0: f32| DocNote {
+            page, x0, y0, x1: 30.0, y1: 40.0, text: String::new(), kind,
+        };
+        assert_eq!(anno_rect(&[], &e), None);
+        assert_eq!(anno_rect(&[note(2, AnnoKind::Highlight, 10.0, 20.0)], &e), None);
+        assert_eq!(anno_rect(&[note(3, AnnoKind::Note, 10.0, 20.0)], &e), None);
+        assert_eq!(anno_rect(&[note(3, AnnoKind::Highlight, 10.2, 20.0)], &e), Some([10.2, 20.0, 30.0, 40.0]));
+        assert_eq!(anno_rect(&[note(3, AnnoKind::Highlight, 11.0, 20.0)], &e), None);
+    }
+
     #[test]
     fn sev() {
         assert_eq!(kind_of_lt("TYPOS"), "Ortografía");
@@ -2955,7 +2980,6 @@ mod tests {
         assert!(!is_loopback_url("http://192.168.1.1:8081/v2/check"));
         assert!(!is_loopback_url("http://localhost.evil.com/v2/check"));
         assert!(!is_loopback_url("https://localhost:8081/v2/check"));
-        assert!(sec_line(12).contains("sin salir del PC"));
     }
     #[test]
     fn span_mapping() {
@@ -3012,12 +3036,13 @@ mod tests {
     /// Estado mínimo para tests (sin UI). Ojo: usar Pdfium cuelga si se
     /// instancea dos veces (un solo test debe tocarlo).
     fn state_for(path: PathBuf, zoom: f32) -> State {
-        let (tx, _rx) = channel::<SpellMsg>();
+        let (tx, _rx) = channel::<SpellEvent>();
+        let (job_tx, _job_rx) = channel::<SpellJob>();
         State {
             pdfium: load_pdfium(),
             doc: None, doc_from: None, doc_stamp: None,
             path: Some(path), working: None, password: None, dlg_pending: None,
-            settings: Settings::default(), err_anno: HashMap::new(), free_rects: None,
+            settings: Settings::default(), free_rects: None,
             page: 0, total: 3,
             words: vec![], page_w: 0.0, page_h: 0.0, img_w: 0, img_h: 0,
             all_errs: vec![
@@ -3025,7 +3050,7 @@ mod tests {
                 Misspelling { word: "segundo".into(), sug: vec!["otro".into()], page: 1, x0: 72.0, y0: 600.0, x1: 130.0, y1: 612.0, dismissed: false, kind: "Sintaxis".into(), sev: "mínima".into() },
             ],
             doc_notes: vec![],
-            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom, free_pt: None, tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, pending: 0, jobs_total: 0, sec_bytes: 0, boot_start: std::time::Instant::now(),
+            scan_id: 0, scan_queue: vec![], scan_pos: 0, popup_until: None, zoom, free_pt: None, tx, job_tx, last_lang: 0, flash: None, view: vec![], view_group: vec![], expanded: HashSet::new(), lt_ready: true, lt_dead: false, lt_spawned: true, pending: 0, jobs_total: 0, boot_start: std::time::Instant::now(),
         syn_received: false, lt_child: None,
         }
     }
@@ -3296,11 +3321,6 @@ mod tests {
         assert_eq!(working_path(std::path::Path::new("/tmp/doc_anotado.pdf")), PathBuf::from("/tmp/doc_anotado.pdf"));
         assert_eq!(working_path(std::path::Path::new("/tmp/doc_anotado_anotado.pdf")), PathBuf::from("/tmp/doc_anotado_anotado.pdf"));
     }
-
-    /// El resaltado debe quedar en el PDF con /QuadPoints (si no, no se ve en
-    /// ningún lector) y con el texto del documento intacto.
-
-    /// Borrar una anotación la quita del PDF (y de la lista en memoria).
 
     #[test]
     fn every_listed_license_file_exists() {

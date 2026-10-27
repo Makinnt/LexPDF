@@ -20,14 +20,13 @@ assets/pdfium/  # libpdfium.so + pdfium.dll + LICENSE.pdfium + licenses/ + VERSI
 assets/icons/   # licencia Apache-2.0 de Material Icons (glifos incrustados en ui/app.slint)
 assets/lt/      # LanguageTool desempaquetado (gitignoreado, lo baja build.rs)
 input/          # PDFs reales de prueba (El-viejo-y-el-mar.pdf)
-index.html      # prototipo web anterior, solo referencia de diseño/UX
 ```
 
 ## Comandos
 
 ```bash
 cargo build                      # debug (~400MB por Slint, normal)
-cargo test --bin lexpdf   # 4 tests (coordenadas, subrayado, kinds, anotación real)
+cargo test --bin lexpdf   # 25 tests (coordenadas, subrayado, kinds, anotación real)
 cargo run -- /ruta/doc.pdf       # argv[1] abre directo, sin diálogo (útil para demos)
 PDF_DARK=1 cargo run -- doc.pdf  # arranca en tema oscuro
 PDFIUM_DYNAMIC_LIB_PATH=...      # alternativa a tener la lib junto al exe
@@ -50,7 +49,8 @@ Estado central: `struct State` en `Rc<RefCell<State>>` (hilo UI).
   (`word, sug, page, box, dismissed, kind, sev`).
 - `view: Vec<usize>` — índices a `all_errs` tras los filtros. Los handlers
   de UI reciben índice de **fila** → mapear por `view` antes de tocar `all_errs`.
-- `scan_queue/scan_pos`, `scan_id`, `flash`, `lt_ready/lt_dead`, `last_lang`, `tx`.
+- `scan_queue/scan_pos`, `scan_id`, `flash`, `lt_ready/lt_dead/lt_spawned`,
+  `last_lang`, `tx` (eventos a la UI), `job_tx` (páginas a los 4 hilos LT).
 
 Flujos:
 
@@ -59,12 +59,15 @@ Flujos:
    sintaxis) + **wash amarillo** (flash) en el bitmap. No toca el escaneo.
 2. `start_scan()` — encola todas las páginas (desde la visible). **No usa hilos.**
 3. `scan_tick()` (Timer 250ms, presupuesto 80ms/tick) — extrae palabras por
-   página y lanza un hilo HTTP al sidecar LT; la barra (`scan-progress`,
-   `scan-text` con %) mide páginas extraídas. Sin LT no avanza (salvo `lt_dead`,
-   que vacía la cola). Los `Syn(gen)` re-subrayan si tocan la página visible.
-4. Sidecar LT (hijo java o externo en :8081, `LtReady/LtFail` con `scan_id`):
-   `syntax_page()` mapea offsets en chars → box unión (`join_words`/`span_to_box`),
-   clase por categoría (`TYPOS`=Ortografía) y `sev` (GRAMMAR=grave…).
+   página y las manda por `job_tx` a **4 hilos trabajadores fijos** (HTTP al
+   sidecar LT); la barra (`scan-progress`, `scan-text` con %) mide páginas
+   extraídas. Sin LT no avanza (salvo `lt_dead`, que vacía la cola). Los
+   `Syn(gen)` re-subrayan si tocan la página visible.
+4. Sidecar LT (`start_lt()`: hijo java en un puerto libre, o servidor externo;
+   `LtReady/LtFail` con `scan_id`): `syntax_page()` mapea offsets en chars → box
+   unión (`join_words`/`span_to_box`), clase por categoría (`TYPOS`=Ortografía)
+   y `sev` (GRAMMAR=grave…). `start_lt` es idempotente (`lt_spawned`); al apagar
+   el motor en Ajustes se mata el hijo, y al encenderlo se vuelve a llamar.
 5. `SpellEvent = LtReady | LtFail | Syn(gen, hits)`. `gen == scan_id` invalida
    respuestas viejas. Cambio de idioma se detecta en el Timer (`lang-idx !=
    last_lang` → `start_scan`). **Nunca Pdfium en hilos** (se cuelga en `bind`).
@@ -210,10 +213,11 @@ Flujos:
   por su cuenta (winit registra la clase con `hIcon: 0`), así que **sin esa
   propiedad la esquina sale en blanco**. El `.ico` de `winresource` en
   build.rs solo sirve para Explorer/accesos directos.
-- **GOTCHA `err_anno`**: el mapa error -> anotación guarda la **clave**
-  (página + rect), NO el índice en `doc_notes`: al borrar una nota los índices
-  se desplazan y el "Borrar" de la card acababa borrando la anotación
-  equivocada (el comentario se iba y el resaltado se quedaba).
+- **Borrar se busca en `doc_notes`** (página + rect, helper `anno_rect`), no en
+  un mapa paralelo: el índice de `all_errs` se reusa al reescanear o abrir otro
+  PDF y el "Borrar" de la card acababa borrando la anotación de otra palabra.
+  `doc_notes` se limpia al abrir y se mantiene al borrar, así que es la única
+  fuente de verdad.
 - **GOTCHA foco automático**: el editor de la card va en un bloque `if` (no
   `visible:`), así los elementos se crean al abrirlo y el `TextInput` puede
   hacer `init => { self.focus(); }` (se escribe sin tocar la caja). El
@@ -273,7 +277,7 @@ Flujos:
   `horizontal-stretch: 0`: al ser el único de su fila se estiraba entera).
 - Extracción = unión simple de boxes por carácter, sin shaping tipográfico.
 - No hay reemplazo de texto en el PDF (cirugía redact+reescribir, fuera del mínimo);
-  las sugerencias son de referencia, como en `index.html`.
+  las sugerencias son solo de referencia.
 
 ## Techos conocidos (no son bugs)
 
@@ -307,8 +311,13 @@ ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `
  sección Recientes → `open_doc`); `build.rs` descarga LT ~240MB a `assets/lt/`
  gitignoreado —requiere red en build y Java 17+ en runtime—; medido: arranque
 -`~4s, ~80ms/check, ~650MB RAM). `cargo test` rápido (sin motores pesados en tests).
-Release actual: **v0.2.5 marcada como prerelease "(experimental)"** (sin bump de
-versión): exe de Windows + AppImage. Los fixes visuales viven en `experimental`.
+Release actual: **v0.2.6 marcada como prerelease "(experimental)"**: exe de Windows
+y AppImage. Las notas de release viven en `release-notes.md` (los dos jobs del
+CI las publican con `body_path`; antes estaban duplicadas y se desincronizaron).
+Fase 6 = los 12 hallazgos de la auditoría (borrar por `doc_notes`, `start_lt`
+para re-encender el motor, ruta en `HisRow`, `has_doc` a false al fallar la
+apertura, 4 hilos fijos con `job_tx` en vez de uno por página, fuera el modo
+`auto` de `syntax_page` y el estado que nadie pintaba).
 Validado en Windows con 1984.pdf (24/10/2026): la última card YA se ve entera.
 **GOTCHA cards cortadas (causa raíz)**: la sidebar tiene `alignment: start`
 (los `vertical-stretch` se IGNORAN con alignment) y el `Flickable` de

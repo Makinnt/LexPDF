@@ -85,25 +85,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
-          body: |
-            ## Novedades de la v0.2.0
-
-            - **Resaltados y comentarios de verdad**: se puede resaltar una palabra o un texto arrastrando encima y escribirle un comentario. El resaltado se guarda como anotación Highlight real del PDF (con /QuadPoints, se ve en cualquier lector) y el comentario, dentro.
-            - **Resaltado libre**: por área, por recuadro o por selección de texto (por defecto, en una sola banda continua por línea). El panel te enseña el texto que has seleccionado de verdad, en negrita.
-            - **Notas adhesivas** (sticky) en cualquier punto, y al pasar el ratón por encima de un resaltado o de una nota sale su comentario en un chip justo encima.
-            - **Borrado fiable**: el "Borrar" de la ficha borra la anotación correcta y deja intactos los demás resaltados.
-            - **Ajustes con explicación línea a línea** (una opción, una línea) y sub-opción del resaltado libre.
-            - **Ventana de Ajustes** propia: color del resaltado, copia de trabajo, motor de revisión, Acerca de y las licencias enteras de cada dependencia (deslizables).
-            - **Licencias**: GPL-3.0-only (la exige Slint), con los textos completos de PDFium (BSD), Material Icons (Apache-2.0), lopdf, LanguageTool y compañía.
-            - **Copia de trabajo única**: las notas van siempre a `{nombre}_anotado.pdf`; ya no se crea un `_anotado_anotado`. Se pregunta al abrir si la quieres y se guarda al momento.
-            - **Documento abierto en memoria**: cambiar de página ya no reabre el PDF (solo renderiza) y la contraseña se pide una sola vez.
-            - **PDF con contraseña**: se pueden abrir documentos protegidos (la clave no se guarda en disco).
-            - **Red cerrada**: el motor de revisión arranca en un puerto libre por ejecución y con el JVM encerrado (no puede salir a Internet). El PDF nunca sale del PC; solo el texto de cada página, en local.
-            - **Permisos**: la copia de trabajo y el historial se guardan en modo 0600 (solo tu usuario).
-            - **Tema claro/oscuro** y iconos Material (Apache-2.0).
-
-            Sigue siendo **100% offline**: ni el PDF ni tus textos salen del equipo.
+          prerelease: true
+          name: Release ${{ github.ref_name }} (experimental)
+          body_path: release-notes.md
           files: dist/LexPDF-x86_64.AppImage
 
   build-windows:
@@ -193,22 +177,5 @@ jobs:
         with:
           prerelease: true
           name: Release ${{ github.ref_name }} (experimental)
-          body: |
-            ## Novedades de la v0.2.0
-
-            - **Resaltados y comentarios de verdad**: se puede resaltar una palabra o un texto arrastrando encima y escribirle un comentario. El resaltado se guarda como anotación Highlight real del PDF (con /QuadPoints, se ve en cualquier lector) y el comentario, dentro.
-            - **Resaltado libre**: por área, por recuadro o por selección de texto (por defecto, en una sola banda continua por línea). El panel te enseña el texto que has seleccionado de verdad, en negrita.
-            - **Notas adhesivas** (sticky) en cualquier punto, y al pasar el ratón por encima de un resaltado o de una nota sale su comentario en un chip justo encima.
-            - **Borrado fiable**: el "Borrar" de la ficha borra la anotación correcta y deja intactos los demás resaltados.
-            - **Ajustes con explicación línea a línea** (una opción, una línea) y sub-opción del resaltado libre.
-            - **Ventana de Ajustes** propia: color del resaltado, copia de trabajo, motor de revisión, Acerca de y las licencias enteras de cada dependencia (deslizables).
-            - **Licencias**: GPL-3.0-only (la exige Slint), con los textos completos de PDFium (BSD), Material Icons (Apache-2.0), lopdf, LanguageTool y compañía.
-            - **Copia de trabajo única**: las notas van siempre a `{nombre}_anotado.pdf`; ya no se crea un `_anotado_anotado`. Se pregunta al abrir si la quieres y se guarda al momento.
-            - **Documento abierto en memoria**: cambiar de página ya no reabre el PDF (solo renderiza) y la contraseña se pide una sola vez.
-            - **PDF con contraseña**: se pueden abrir documentos protegidos (la clave no se guarda en disco).
-            - **Red cerrada**: el motor de revisión arranca en un puerto libre por ejecución y con el JVM encerrado (no puede salir a Internet). El PDF nunca sale del PC; solo el texto de cada página, en local.
-            - **Permisos**: la copia de trabajo y el historial se guardan en modo 0600 (solo tu usuario).
-            - **Tema claro/oscuro** y iconos Material (Apache-2.0).
-
-            Sigue siendo **100% offline**: ni el PDF ni tus textos salen del equipo.
+          body_path: release-notes.md
           files: dist/lexpdf-setup.exe

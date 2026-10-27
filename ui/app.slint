@@ -38,6 +38,7 @@ struct NoteRow {
 struct HisRow {
     name: string,
     info: string,
+    path: string,
 }
 
 component MiniBtn inherits Rectangle {
@@ -651,7 +652,6 @@ export component AppWindow inherits Window {
     in-out property <int> lang-idx: 0;
     in-out property <bool> has-doc: false;
     in-out property <int> word-count: 0;
-    in-out property <string> word-sample: "";
     in-out property <[ErrRow]> errors;
     // alto total estimado de las cards (Rust) + editor de comentario si está abierto
     // ubicación del aviso (toast): 0 = arriba (por defecto) · 1 = abajo
@@ -661,7 +661,6 @@ export component AppWindow inherits Window {
     in-out property <bool> has-working: true;
     // herramienta activa: 0 = normal · 1 = nota (sticky) · 2 = resaltar · 3 = borrar
     in-out property <int> tool-mode: 0;
-    in-out property <string> tool-hint: "";
     // goma elástica del resaltado libre (px de la imagen de la página)
     in-out property <float> drag-x0: 0;
     in-out property <float> drag-y0: 0;
@@ -684,7 +683,6 @@ export component AppWindow inherits Window {
     in-out property <bool> scanning: false;
     in-out property <int> scan-progress: 0;
     in-out property <string> scan-text: "";
-    in-out property <string> lt-status: "Motor: iniciando…";
     in-out property <string> version: "?";
     in-out property <int> selected-note: -1;
     in-out property <string> note-text: "";

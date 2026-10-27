@@ -17,7 +17,7 @@ de trabajar:
 - **El código es legible y está documentado**, pero es *mucho* código en dos ficheros
   (`src/main.rs` y `ui/app.slint`). No hay capas, ni abstracciones, ni patrones de
   arquitectura: hay funciones y structs. Para un proyecto de un solo ejecutable, funciona.
-- **Hay tests**, pero son 16 tests de las partes que duelen (coordenadas, subrayado,
+- **Hay tests**, pero son 25 tests de las partes que duelen (coordenadas, subrayado,
   redondeo de notas, permisos, el chute del `RefCell` que tumbaba la app). No hay
   cobertura end-to-end.
 - **Los bugs existen y los conoces por el camino.** Los que nos comimos están escritos
@@ -83,7 +83,7 @@ verificable, y los mensajes dicen qué se tocaba y por qué.
 cargo run -- /ruta/doc.pdf      # abre directo, sin diálogo
 cargo run                        # sin argumento: eliges el PDF
 PDF_DARK=1 cargo run -- doc.pdf  # arranca en oscuro
-cargo test --bin lexpdf          # 17 tests, rápido
+cargo test --bin lexpdf          # 25 tests, rápido
 cargo build                      # debug; ~400 MB por Slint, es normal
 ```
 
@@ -118,7 +118,6 @@ assets/pdfium/  # libpdfium.so + pdfium.dll + LICENSE.pdfium + licenses/
 assets/icons/   # licencia Apache-2.0 de Material Icons
 assets/lt/      # LanguageTool desempaquetado (gitignoreado, lo baja build.rs)
 input/          # PDFs de prueba
-index.html      # prototipo web anterior, solo referencia de diseño/UX
 ```
 
 En runtime, LanguageTool se busca en: `$LT_HOME` → junto al ejecutable →
