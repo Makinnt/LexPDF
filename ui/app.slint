@@ -716,6 +716,7 @@ export component AppWindow inherits Window {
     callback sev-set(int);
     callback popup-dismiss();
     callback history-open(int);
+    callback clear-history();
     callback zoom-in();
     callback zoom-out();
     callback zoom-text(string);
@@ -869,7 +870,16 @@ export component AppWindow inherits Window {
 
                 if (root.history.length > 0): VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Recientes"; font-size: 14px; font-weight: 700; color: root.c-fg; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Recientes"; font-size: 14px; font-weight: 700; color: root.c-fg; horizontal-stretch: 1; vertical-alignment: center; }
+                        MiniBtn {
+                            width: 90px; horizontal-stretch: 0;
+                            label: "Borrar";
+                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
+                            clicked => { root.clear-history(); }
+                        }
+                    }
                     VerticalLayout {
                         spacing: 2px;
                         for h[i] in root.history: Rectangle {
@@ -904,13 +914,6 @@ export component AppWindow inherits Window {
                 Text {
                     text <=> root.scan-text; font-size: 12px; color: root.c-dim;
                     visible: root.scanning; vertical-stretch: 0;
-                }
-                Text {
-                    text <=> root.lt-status; font-size: 12px; color: root.c-dim; vertical-stretch: 0;
-                }
-                Text {
-                    text: "LexPDF v" + root.version + " · 100% local";
-                    font-size: 11px; color: root.c-dim;
                 }
 
                 // resultados

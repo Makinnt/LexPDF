@@ -2720,6 +2720,16 @@ fn main() -> anyhow::Result<()> {
     }
     {
         let ui_weak = ui.as_weak();
+        ui.on_clear_history(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if let Some(f) = history_file() {
+                let _ = std::fs::remove_file(&f);
+            }
+            push_history(&ui);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
         let st = st.clone();
         ui.on_type_set(move |f| {
             if let Some(ui) = ui_weak.upgrade() {
