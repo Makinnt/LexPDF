@@ -874,8 +874,8 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Text { text: "Recientes"; font-size: 14px; font-weight: 700; color: root.c-fg; horizontal-stretch: 1; vertical-alignment: center; }
                         MiniBtn {
-                            width: 90px; horizontal-stretch: 0;
-                            label: "Borrar";
+                            width: 120px; horizontal-stretch: 0;
+                            label: "Limpiar historial";
                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.clear-history(); }
                         }
@@ -1468,12 +1468,12 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         MiniBtn {
-                            label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
+                            label: root.dlg-kind == 0 ? "Ahora no" : "Cancelar";
                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(false); }
                         }
                         MiniBtn {
-                            label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
+                            label: root.dlg-kind == 1 ? "Abrir" : (root.dlg-kind == 2 ? "Sí, limpiar" : "Sí, crear");
                             bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(true); }
                         }

@@ -98,6 +98,7 @@ enum Pending {
     CreateCopy,                       // crear la copia de trabajo y seguir
     CreateCopyThenNote(AnnotateReq),  // crear la copia y luego anotar
     OpenWithPassword(PathBuf),        // reintentar la apertura con contraseña
+    ClearHistory,                     // limpiar el historial de recientes
 }
 
 /// Anotación a crear (se aplica al documento abierto).
@@ -2640,8 +2641,7 @@ fn main() -> anyhow::Result<()> {
                         Err(e) => notify(&ui, &st, format!("No se pudo crear la copia: {e:#}")),
                     }
                 }
-                Some(Pending::CreateCopyThenNote(req)) => {
-                    if !yes {
+                Some(Pending::CreateCopyThenNote(req)) => {                    if !yes {
                         notify(&ui, &st, "Sin copia de trabajo no se puede guardar la nota".into());
                         return;
                     }
@@ -2658,6 +2658,15 @@ fn main() -> anyhow::Result<()> {
                         let mut s = st.borrow_mut();
                         s.free_pt = None;
                         s.free_rects = None;
+                    }
+                }
+                Some(Pending::ClearHistory) => {
+                    if yes {
+                        if let Some(f) = history_file() {
+                            let _ = std::fs::remove_file(&f);
+                        }
+                        push_history(&ui);
+                        notify(&ui, &st, "Historial limpio".into());
                     }
                 }
                 None => {}
@@ -2720,12 +2729,12 @@ fn main() -> anyhow::Result<()> {
     }
     {
         let ui_weak = ui.as_weak();
+        let st = st.clone();
         ui.on_clear_history(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
-            if let Some(f) = history_file() {
-                let _ = std::fs::remove_file(&f);
-            }
-            push_history(&ui);
+            show_dlg(&ui, 2, "Limpiar historial",
+                "Se borrará la lista de documentos recientes. El original y las copias de trabajo no se tocan.");
+            st.borrow_mut().dlg_pending = Some(Pending::ClearHistory);
         });
     }
     {
