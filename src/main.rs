@@ -2845,9 +2845,9 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// Fixture para anotar: /tmp se limpia solo; se restaura desde input/.
+    /// Fixture para anotar: temp_dir se limpia solo; se restaura desde input/.
     fn fixture_pdf() -> PathBuf {
-        let tmp = PathBuf::from("/tmp/doc3.pdf");
+        let tmp = std::env::temp_dir().join("doc3.pdf");
         if !tmp.is_file() {
             let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("input/El-viejo-y-el-mar.pdf");
             std::fs::copy(&src, &tmp).expect("ni input/El-viejo-y-el-mar.pdf existe");
@@ -3295,7 +3295,7 @@ mod tests {
 
     #[test]
     fn working_copy_is_private() {        // nombre propio: los tests corren en paralelo y comparten /tmp
-        let src = std::path::PathBuf::from("/tmp/doc3_priv.pdf");
+        let src = std::env::temp_dir().join("doc3_priv.pdf");
         std::fs::copy(fixture_pdf(), &src).unwrap();
         let out = copy_to_working(&src).unwrap();
         #[cfg(unix)]

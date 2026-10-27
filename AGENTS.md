@@ -303,9 +303,17 @@ ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `
 -`~4s, ~80ms/check, ~650MB RAM). `cargo test` rápido (sin motores pesados en tests).
 Release actual: **v0.2.5 marcada como prerelease "(experimental)"** (sin bump de
 versión): exe de Windows + AppImage. Los fixes visuales viven en `experimental`.
-Pendiente de validar en Windows: última card sin llegar a sus botones/editor,
-alto variable de cards y botones (texto cortado a "o…"), card única demasiado
-alta y leyenda "Añadir comentario" también en el resaltado libre.
+Validado en Windows con 1984.pdf (24/10/2026): la última card YA se ve entera.
+**GOTCHA cards cortadas (causa raíz)**: la sidebar tiene `alignment: start`
+(los `vertical-stretch` se IGNORAN con alignment) y el `Flickable` de
+resultados tenía `height: 420px` FIJO → con historial + textos de estado el
+420px terminaba POR DEBAJO del borde de la ventana y esa banda nunca se veía
+(el scroll ocurre dentro del Flickable). Fix: quitar `alignment: start`,
+quitar el alto fijo y dar `vertical-stretch: 1` al Flickable (come el resto);
+los `Text` con wrap y sin alto fijo de la sidebar llevan `vertical-stretch: 0`
+para no repartirse el espacio con él (en Slint solo crecen los de `max > pref`;
+los de alto fijo nunca crecen). Pendiente de validar en Windows: card única
+demasiado alta y leyenda "Añadir comentario" también en el resaltado libre.
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)

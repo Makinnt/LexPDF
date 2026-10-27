@@ -784,7 +784,9 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 10px;
-                alignment: start;
+                // sin `alignment: start`: el Flickable de abajo necesita absorber
+                // el espacio sobrante (con start los stretch se ignoran y el
+                // Flickable de 420px se salía por el borde de la ventana).
 
                 HorizontalLayout {
                     spacing: 8px;
@@ -863,7 +865,7 @@ export component AppWindow inherits Window {
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.lang-set(i); } }
                     }
                 }
-                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; }
+                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0; }
 
                 if (root.history.length > 0): VerticalLayout {
                     spacing: 4px;
@@ -901,10 +903,10 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text <=> root.scan-text; font-size: 12px; color: root.c-dim;
-                    visible: root.scanning;
+                    visible: root.scanning; vertical-stretch: 0;
                 }
                 Text {
-                    text <=> root.lt-status; font-size: 12px; color: root.c-dim;
+                    text <=> root.lt-status; font-size: 12px; color: root.c-dim; vertical-stretch: 0;
                 }
                 Text {
                     text: "LexPDF v" + root.version + " · 100% local";
@@ -941,9 +943,10 @@ export component AppWindow inherits Window {
                     }
                 }
                 Flickable {
-                    height: 420px;
-                    // sin esto el Flickable mide lo que su contenido (las cards)
-                    // y acaba antes que la fila Tipo/Gravedad
+                    // ocupa el espacio que queda en la sidebar (antes 420px
+                    // fijos: se salían por debajo del borde de la ventana y
+                    // la última card nunca se veía completa)
+                    vertical-stretch: 1;
                     horizontal-stretch: 1;
                     visible: root.has-doc;
                     // slint#407: NO poner height/min-height al layout — el
@@ -1092,13 +1095,14 @@ export component AppWindow inherits Window {
                     text: "El visor PDF aparecerá a la derecha cuando abras un documento.";
                     font-size: 13px; color: root.c-dim; wrap: word-wrap;
                     horizontal-alignment: center;
+                    vertical-stretch: 0;
                     visible: !root.has-doc;
                 }
                 // pista: las notas ya no se listan, se ven al pasar el ratón por el marcador
                 if (root.page-notes.length > 0): Text {
                     text: "Notas: " + root.page-notes.length + " en esta página · "
                         + root.note-total + " en el documento · pásale el ratón por los marcadores ámbar";
-                    font-size: 11px; color: root.c-dim; wrap: word-wrap;
+                    font-size: 11px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0;
                 }
             }
         }
