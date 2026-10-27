@@ -72,6 +72,15 @@ jobs:
           name: LexPDF-linux
           path: dist/LexPDF-x86_64.AppImage
 
+      # el tag re-pushed deja la release anterior en draft y el edit de
+      # softprops muere contra ese estado: mejor recrear cada vez (como #28)
+      - name: Borra release previa (si existe)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release delete "$GITHUB_REF_NAME" --yes || true
+
       - name: Release con AppImage
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -182,7 +191,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          prerelease: true
+          name: Release ${{ github.ref_name }} (experimental)
           body: |
             ## Novedades de la v0.2.0
 

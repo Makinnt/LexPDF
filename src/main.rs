@@ -98,6 +98,7 @@ enum Pending {
     CreateCopy,                       // crear la copia de trabajo y seguir
     CreateCopyThenNote(AnnotateReq),  // crear la copia y luego anotar
     OpenWithPassword(PathBuf),        // reintentar la apertura con contraseña
+    ClearHistory,                     // limpiar el historial de recientes
 }
 
 /// Anotación a crear (se aplica al documento abierto).
@@ -182,10 +183,10 @@ fn kind_bar(sev: &str) -> slint::Color {
 
 fn desc_for(kind: &str, en: bool) -> &'static str {
     match (kind, en) {
-        ("Sintaxis", false) => "Posible error de sintaxis (LanguageTool)",
-        ("Sintaxis", true) => "Possible grammar issue (LanguageTool)",
-        (_, false) => "Posible falta de ortografía (LanguageTool)",
-        (_, true) => "Possible spelling mistake (LanguageTool)",
+        ("Sintaxis", false) => "Posible error de sintaxis",
+        ("Sintaxis", true) => "Possible grammar issue",
+        (_, false) => "Posible error de ortografía",
+        (_, true) => "Possible spelling mistake",
     }
 }
 
@@ -520,15 +521,11 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
             let gsev = worst_sev(all.iter().filter(|x| x.word == e.word).map(|x| x.sev.as_str()));
             view.push(lead);
             view_group.push(Some(e.word.clone()));
-            let gdesc = if en {
-                format!("Repeated {n} times — comment/reject applies to all")
-            } else {
-                format!("Se repite {n} veces — comentar/rechazar aplica a todas")
-            };
+            let gdesc = desc_for(&e.kind, en);
             let gsug = if sug.is_empty() {
                 (if en { "No suggestions" } else { "No hay sugerencias" }).to_string()
             } else {
-                format!("→ {} | {}", sug.join(", "), if en { "tap for pages" } else { "toca para ver páginas" })
+                format!("→ {}", sug.join(", "))
             };
             rows.push(ErrRow {
                 word: format!("{} (×{n})", e.word).into(),
@@ -542,7 +539,6 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 count: n as i32,
                 is_group: true,
                 has_anno: all.iter().enumerate().any(|(k, x)| x.word == e.word && err_anno.contains_key(&k)),
-                h: card_h(&gdesc, &gsug, true),
             });
         } else {
             view.push(gi);
@@ -563,18 +559,11 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
                 count: n as i32,
                 is_group: false,
                 has_anno: err_anno.contains_key(&gi),
-                h: card_h(&desc_for(&e.kind, en), &format!("→ {}", e.sug.join(", ")), false),
             });
         }
     }
     st.borrow_mut().view = view;
     st.borrow_mut().view_group = view_group;
-    // slint#407: el Flickable de cards necesita el alto total del contenido
-    let mut htot = 6 * rows.len() as i32;
-    for r in &rows {
-        htot += r.h;
-    }
-    ui.set_errors_h(htot);
     ui.set_errors(ModelRc::new(VecModel::from_slice(&rows)));
     if rows.is_empty() {
         // ventana en blanco con causa: sin motor no hay nada que listar
@@ -1055,16 +1044,16 @@ struct LicInfo {
 fn license_entries() -> Vec<LicInfo> {
     vec![
         LicInfo { name: "LexPDF (esta app)", lic: "GPL-3.0-only", repo: "https://github.com/Makinnt/LexPDF", files: &["GPL3-LexPDF.txt"] },
-        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only (o licencia comercial de Slint)", repo: "https://github.com/slint-ui/slint", files: &["GPL3-Slint.txt"] },
+        LicInfo { name: "Slint (interfaz)", lic: "GPL-3.0-only", repo: "https://github.com/slint-ui/slint", files: &["GPL3-Slint.txt"] },
         LicInfo { name: "PDFium (motor de render)", lic: "BSD-3-Clause", repo: "https://github.com/pdfium/pdfium", files: &["BSD3-PDFium.txt"] },
-        LicInfo { name: "pdfium-render", lic: "MIT o Apache-2.0", repo: "https://github.com/ajrcarey/pdfium-render", files: &["MIT-pdfium-render.txt", "Apache2-pdfium-render.txt"] },
+        LicInfo { name: "pdfium-render", lic: "MIT", repo: "https://github.com/ajrcarey/pdfium-render", files: &["MIT-pdfium-render.txt"] },
         LicInfo { name: "LanguageTool (motor de revisión)", lic: "LGPL-2.1", repo: "https://github.com/languagetool-org/languagetool", files: &["LGPL21-LT.txt"] },
         LicInfo { name: "lopdf", lic: "MIT", repo: "https://github.com/J-F-Liu/lopdf", files: &["MIT-lopdf.txt"] },
-        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT o Apache-2.0", repo: "https://github.com/algesten/ureq", files: &["MIT-ureq.txt", "Apache2-ureq.txt"] },
-        LicInfo { name: "image", lic: "MIT o Apache-2.0", repo: "https://github.com/image-rs/image", files: &["MIT-image.txt", "Apache2-image.txt"] },
+        LicInfo { name: "ureq (HTTP al sidecar)", lic: "MIT", repo: "https://github.com/algesten/ureq", files: &["MIT-ureq.txt"] },
+        LicInfo { name: "image", lic: "MIT", repo: "https://github.com/image-rs/image", files: &["MIT-image.txt"] },
         LicInfo { name: "rfd (diálogo de archivos)", lic: "MIT", repo: "https://github.com/PolyMeilex/rfd", files: &["MIT-rfd.txt"] },
-        LicInfo { name: "anyhow", lic: "MIT o Apache-2.0", repo: "https://github.com/dtolnay/anyhow", files: &["MIT-anyhow.txt", "Apache2-anyhow.txt"] },
-        LicInfo { name: "serde / serde_json", lic: "MIT o Apache-2.0", repo: "https://github.com/serde-rs/serde", files: &["MIT-serde.txt", "Apache2-serde.txt"] },
+        LicInfo { name: "anyhow", lic: "MIT", repo: "https://github.com/dtolnay/anyhow", files: &["MIT-anyhow.txt"] },
+        LicInfo { name: "serde / serde_json", lic: "MIT", repo: "https://github.com/serde-rs/serde", files: &["MIT-serde.txt"] },
         LicInfo { name: "Material Icons Outlined", lic: "Apache-2.0", repo: "https://github.com/google/material-design-icons", files: &["Apache2-icons.txt"] },
     ]
 }
@@ -1086,18 +1075,6 @@ fn asset_file(name: &str) -> Option<PathBuf> {
 
 /// Alto estimado del texto de una licencia (px) a 11px de fuente en una
 /// columna de 520px. Puro y testeable.
-/// Alto estimado de una card de la lista de errores en px. El Flickable con
-/// `for` no computa el content-height (slint#407): se lo damos sumando estas
-/// estimaciones. Fuentes del repo: desc 13px, sug 12px, botones 26px.
-fn card_h(desc: &str, sug: &str, grouped: bool) -> i32 {
-    let lines = |t: &str, per: f32| -> i32 { (t.chars().count() as f32 / per).ceil().max(1.0) as i32 };
-    let mut h = 12 + 20 + 6 + lines(desc, 55.0) * 15 + lines(sug, 60.0) * 14 + 3 + 26 + 6;
-    if grouped {
-        h += 3 + 26; // filas de Agrupar/Desagrupar
-    }
-    h
-}
-
 fn license_height(text: &str) -> i32 {
     let chars = text.chars().count() as f32;
     let lineas = text.lines().count() as f32;
@@ -1824,12 +1801,8 @@ fn push_page_notes(ui: &AppWindow, st: &State) {
             // resaltado usa su rectángulo entero, para que el tooltip salga
             // al pasar por encima del texto resaltado.
             let (x, y, w, h) = if w < 4.0 || h < 4.0 { (x - 12.0, y - 12.0, 24.0, 24.0) } else { (x, y, w.max(24.0), h.max(12.0)) };
-            // el chip del comentario es de una linea: se acorta
-            let mut t: String = n.text.chars().take(45).collect();
-            if n.text.chars().count() > 45 {
-                t.push('…');
-            }
-            NoteRow { text: t.into(), page: n.page as i32, x, y, w, h, idx: i as i32 }
+            // el chip hace wrap, asi que el texto va entero
+            NoteRow { text: n.text.clone().into(), page: n.page as i32, x, y, w, h, idx: i as i32 }
         })
         .collect();
     ui.set_page_notes(ModelRc::new(VecModel::from_slice(&pn)));
@@ -1884,8 +1857,6 @@ fn main() -> anyhow::Result<()> {
     if std::env::var("PDF_DARK").is_ok() {
         ui.set_is_dark(true);
     }
-    // aviso de privacidad: el texto se revisa en local, no sale del PC
-    ui.set_popup_text("El texto de cada página se revisa con LanguageTool en este PC: no sale a Internet.".into());
     let (tx, rx) = channel::<SpellMsg>();
     let st = Rc::new(RefCell::new(State {
         pdfium: load_pdfium(),
@@ -1944,7 +1915,6 @@ fn main() -> anyhow::Result<()> {
                         st.borrow_mut().lt_ready = true;
                         st.borrow_mut().lt_child = child;
                         ui.set_lt_status("Motor: listo (local, sin red).".into());
-                        notify(&ui, &st, "Revisión lista (LanguageTool local).".into());
                     }
                     SpellEvent::LtFail(msg) => {
                         st.borrow_mut().lt_dead = true;
@@ -2290,7 +2260,7 @@ fn main() -> anyhow::Result<()> {
             }
             ui.set_tool_mode(3);
             ui.set_free_note_on(false);
-            notify(&ui, &st, "Pincha en un marcador para borrarlo".into());
+            notify(&ui, &st, "Pincha un marcador para borrarlo · vuelve a pulsar el icono para salir".into());
         });
     }
     {
@@ -2672,8 +2642,7 @@ fn main() -> anyhow::Result<()> {
                         Err(e) => notify(&ui, &st, format!("No se pudo crear la copia: {e:#}")),
                     }
                 }
-                Some(Pending::CreateCopyThenNote(req)) => {
-                    if !yes {
+                Some(Pending::CreateCopyThenNote(req)) => {                    if !yes {
                         notify(&ui, &st, "Sin copia de trabajo no se puede guardar la nota".into());
                         return;
                     }
@@ -2690,6 +2659,15 @@ fn main() -> anyhow::Result<()> {
                         let mut s = st.borrow_mut();
                         s.free_pt = None;
                         s.free_rects = None;
+                    }
+                }
+                Some(Pending::ClearHistory) => {
+                    if yes {
+                        if let Some(f) = history_file() {
+                            let _ = std::fs::remove_file(&f);
+                        }
+                        push_history(&ui);
+                        notify(&ui, &st, "Historial limpio".into());
                     }
                 }
                 None => {}
@@ -2748,6 +2726,16 @@ fn main() -> anyhow::Result<()> {
                 Some(p) if p.is_file() => open_doc(&ui, &st, p),
                 _ => notify(&ui, &st, "Ese archivo ya no existe.".into()),
             }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_clear_history(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            show_dlg(&ui, 2, "Limpiar historial",
+                "Se borrará la lista de documentos recientes. El original y las copias de trabajo no se tocan.");
+            st.borrow_mut().dlg_pending = Some(Pending::ClearHistory);
         });
     }
     {
@@ -2877,9 +2865,9 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// Fixture para anotar: /tmp se limpia solo; se restaura desde input/.
+    /// Fixture para anotar: temp_dir se limpia solo; se restaura desde input/.
     fn fixture_pdf() -> PathBuf {
-        let tmp = PathBuf::from("/tmp/doc3.pdf");
+        let tmp = std::env::temp_dir().join("doc3.pdf");
         if !tmp.is_file() {
             let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("input/El-viejo-y-el-mar.pdf");
             std::fs::copy(&src, &tmp).expect("ni input/El-viejo-y-el-mar.pdf existe");
@@ -3327,7 +3315,7 @@ mod tests {
 
     #[test]
     fn working_copy_is_private() {        // nombre propio: los tests corren en paralelo y comparten /tmp
-        let src = std::path::PathBuf::from("/tmp/doc3_priv.pdf");
+        let src = std::env::temp_dir().join("doc3_priv.pdf");
         std::fs::copy(fixture_pdf(), &src).unwrap();
         let out = copy_to_working(&src).unwrap();
         #[cfg(unix)]

@@ -23,7 +23,6 @@ struct ErrRow {
     count: int,
     is_group: bool,
     has_anno: bool,   // ya tiene resaltado+comentario (se puede borrar)
-    h: int,           // alto estimado de la card (lo pone Rust; slint#407)
 }
 
 struct NoteRow {
@@ -47,7 +46,7 @@ component MiniBtn inherits Rectangle {
     in property <color> fg: #222;
     in property <color> bd: transparent;   // borde (en oscuro se ve mejor)
     callback clicked;
-    height: 22px;
+    height: 25px;
     horizontal-stretch: 1;
     background: bg;
     border-radius: 4px;
@@ -418,7 +417,7 @@ component SettingsPanel inherits Rectangle {
                 }
             }
             Rectangle {
-                height: 30px; border-radius: 4px;
+                height: 30px; width: 90px; border-radius: 4px;
                 background: Pal.c-fg;
                 Text {
                     text: "Guardar"; font-size: 13px; color: Pal.c-accent-fg;
@@ -632,6 +631,7 @@ global Pal {
 
 export component AppWindow inherits Window {
     title: "LexPDF";
+    icon: @image-url("../assets/logo.png");
     min-width: 900px;
     min-height: 600px;
     init => { root.win-w = self.width; root.win-h = self.height; }
@@ -647,7 +647,6 @@ export component AppWindow inherits Window {
     in-out property <string> word-sample: "";
     in-out property <[ErrRow]> errors;
     // alto total estimado de las cards (Rust) + editor de comentario si está abierto
-    in-out property <int> errors-h: 0;
     // ubicación del aviso (toast): 0 = arriba (por defecto) · 1 = abajo
     in-out property <int> toast-pos: 0;
     in-out property <[NoteRow]> page-notes;
@@ -710,6 +709,7 @@ export component AppWindow inherits Window {
     callback sev-set(int);
     callback popup-dismiss();
     callback history-open(int);
+    callback clear-history();
     callback zoom-in();
     callback zoom-out();
     callback zoom-text(string);
@@ -778,7 +778,9 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 10px;
-                alignment: start;
+                // sin `alignment: start`: el Flickable de abajo necesita absorber
+                // el espacio sobrante (con start los stretch se ignoran y el
+                // Flickable de 420px se salía por el borde de la ventana).
 
                 HorizontalLayout {
                     spacing: 8px;
@@ -857,11 +859,20 @@ export component AppWindow inherits Window {
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.lang-set(i); } }
                     }
                 }
-                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; }
+                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0; }
 
                 if (root.history.length > 0): VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Recientes"; font-size: 14px; font-weight: 700; color: root.c-fg; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Recientes"; font-size: 14px; font-weight: 700; color: root.c-fg; horizontal-stretch: 1; vertical-alignment: center; }
+                        MiniBtn {
+                            width: 120px; horizontal-stretch: 0;
+                            label: "Limpiar historial";
+                            bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
+                            clicked => { root.clear-history(); }
+                        }
+                    }
                     VerticalLayout {
                         spacing: 2px;
                         for h[i] in root.history: Rectangle {
@@ -895,14 +906,7 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text <=> root.scan-text; font-size: 12px; color: root.c-dim;
-                    visible: root.scanning;
-                }
-                Text {
-                    text <=> root.lt-status; font-size: 12px; color: root.c-dim;
-                }
-                Text {
-                    text: "LexPDF v" + root.version + " · 100% local";
-                    font-size: 11px; color: root.c-dim;
+                    visible: root.scanning; vertical-stretch: 0;
                 }
 
                 // resultados
@@ -935,68 +939,106 @@ export component AppWindow inherits Window {
                     }
                 }
                 Flickable {
-                    height: 420px;
+                    // ocupa el espacio que queda en la sidebar (antes 420px
+                    // fijos: se salían por debajo del borde de la ventana y
+                    // la última card nunca se veía completa)
+                    vertical-stretch: 1;
+                    horizontal-stretch: 1;
                     visible: root.has-doc;
-                    // slint issue #407: Flickable + `for` no calcula el alto del
-                    // contenido; lo alimenta Rust (errors-h) y cada card lleva
-                    // su alto (h) para que el layout no reparta el hueco
+                    // slint#407: NO poner height/min-height al layout — el
+                    // content-height sale de su min-height AUTOMÁTICA (suma de
+                    // las cards). Fijarlo a un número desfasa el scroll.
                     VerticalLayout {
-                        height: (root.errors-h + (root.selected-note >= 0 ? 62 : 0)) * 1px;
                         spacing: 6px;
+                        // Cards a ALTO NATURAL (sin height fija) y sin stretch:
+                        // si no, con pocos resultados se estiran hasta llenar
+                        // el Flickable.
                         for e[i] in root.errors: Rectangle {
-                            height: (e.h + (root.selected-note == i ? 62 : 0)) * 1px;
+                            vertical-stretch: 0;
+                            width: 360px;
                             border-color: root.c-line;
                             border-width: 1px;
                             border-radius: 6px;
                             background: root.c-card;
                             opacity: e.dimmed ? 0.45 : 1;
                             HorizontalLayout {
+                                width: 360px;
                                 spacing: 0;
                                 // franja de color por tipo, como index.html
                                 Rectangle { width: 5px; background: e.bar; }
                                 VerticalLayout {
+                                    width: 355px;
                                     padding: 6px;
                                     spacing: 3px;
                                     horizontal-stretch: 1;
                                     Rectangle {
-                                        height: 20px;
+                                        height: 24px;
                                         HorizontalLayout {
                                             spacing: 6px;
+                                            horizontal-stretch: 1;
                                             Text { text: e.word; font-size: 14px; font-weight: 700; color: root.c-fg; vertical-alignment: center; }
-                                            Text { text: e.kind + " · " + e.sev + " · pág " + (e.page + 1); font-size: 12px; color: root.c-dim; vertical-alignment: center; }
                                         }
                                         TouchArea { width: parent.width; height: parent.height; clicked => { root.error-clicked(i); } }
                                     }
-                                    Text { text: e.desc; font-size: 13px; font-italic: true; color: root.c-dim; wrap: word-wrap; }
-                                    Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; }
+                                    // entre la palabra y la leyenda: tipo · gravedad · pág
+                                    Text {
+                                        text: e.kind + " · " + e.sev + " · pág " + (e.page + 1);
+                                        font-size: 12px; color: root.c-dim; height: 19px;
+                                        overflow: elide; vertical-alignment: center;
+                                    }
+                                    // leyenda: todas las cards la muestran
+                                    Text {
+                                        text: e.desc; font-size: 13px; font-italic: true; color: root.c-dim;
+                                        wrap: word-wrap; overflow: elide;
+                                        height: 36px; vertical-alignment: top;
+                                    }
+                                    Text { text: e.sug; font-size: 12px; color: root.c-fg; wrap: word-wrap; overflow: elide; height: 19px; }
+                                    // dos filas de 2 botones como mucho: con 3-4 en
+                                    // una sola fila el layout los encoge y el
+                                    // texto sale elidido ("Añadir comen…").
                                     HorizontalLayout {
                                         spacing: 4px;
                                         MiniBtn {
+                                            width: 169px;
                                             label: e.dimmed ? "Restaurar" : "Omitir";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.omit-clicked(i); }
                                         }
                                         MiniBtn {
-                                            label: "Comentar";
+                                            width: 169px;
+                                            label: "Añadir comentario";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.note-clicked(i); }
                                         }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
                                         MiniBtn {
+                                            width: 169px;
                                             label: "Obs. gramatical";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.grammar-clicked(i); }
                                         }
+                                        // siempre en la fila (un `if`/`visible`
+                                        // aquí deja medio hueco): si no hay
+                                        // anotación se ve apagado y no hace nada
                                         MiniBtn {
+                                            width: 169px;
                                             label: "Borrar";
+                                            opacity: e.has_anno ? 1 : 0.4;
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
-                                            visible: e.has_anno;
-                                            clicked => { root.delete-anno(i); }
+                                            clicked => { if (e.has_anno) { root.delete-anno(i); } }
                                         }
                                     }
                                     HorizontalLayout {
                                         spacing: 4px;
                                         visible: e.count >= 5;
+                                        // mismo tamaño que el grid 2x2 (la
+                                        // variante anterior a 100px se veía
+                                        // despareja junto a las otras filas)
                                         MiniBtn {
+                                            width: 169px;
+                                            horizontal-stretch: 0;
                                             label: e.is-group ? "Desagrupar (×" + e.count + ")" : "Agrupar (×" + e.count + ")";
                                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                             clicked => { root.group-toggle(i); }
@@ -1034,11 +1076,13 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 4px;
                                             MiniBtn {
+                                                width: 169px;
                                                 label: "Guardar";
                                                 bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                                                 clicked => { root.save-note(i); }
                                             }
                                             MiniBtn {
+                                                width: 169px;
                                                 label: "Cancelar";
                                                 bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                                                 clicked => { root.note-cancel(i); }
@@ -1054,13 +1098,14 @@ export component AppWindow inherits Window {
                     text: "El visor PDF aparecerá a la derecha cuando abras un documento.";
                     font-size: 13px; color: root.c-dim; wrap: word-wrap;
                     horizontal-alignment: center;
+                    vertical-stretch: 0;
                     visible: !root.has-doc;
                 }
                 // pista: las notas ya no se listan, se ven al pasar el ratón por el marcador
                 if (root.page-notes.length > 0): Text {
                     text: "Notas: " + root.page-notes.length + " en esta página · "
                         + root.note-total + " en el documento · pásale el ratón por los marcadores ámbar";
-                    font-size: 11px; color: root.c-dim; wrap: word-wrap;
+                    font-size: 11px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0;
                 }
             }
         }
@@ -1115,14 +1160,19 @@ export component AppWindow inherits Window {
                     }
                     // resaltar texto libre (arrastrando un rectángulo)
                     Rectangle {
-                        width: 30px; height: 28px;
+                        width: 152px; height: 28px;
                         background: root.tool-mode == 2 ? root.c-accent : root.c-pill;
                         border-radius: 4px;
                         IconMarker {
                             width: 18px; height: 18px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                            x: 8px; y: (parent.height - self.height) / 2;
                             fill: root.tool-mode == 2 ? root.c-accent-fg : root.c-fg;
+                        }
+                        Text {
+                            text: "Añadir comentario"; font-size: 12px;
+                            color: root.tool-mode == 2 ? root.c-accent-fg : root.c-fg;
+                            x: 30px; y: (parent.height - self.height) / 2;
+                            vertical-alignment: center;
                         }
                         TouchArea { width: parent.width; height: parent.height; clicked => { highlight-new(); } }
                     }
@@ -1162,10 +1212,12 @@ export component AppWindow inherits Window {
                                 width: 58px; height: 28px;
                                 background: root.c-pill; border-radius: 4px;
                                 TextInput {
-                                    text: root.zoom-label;
+                                    // dos sentidos: al cambiar el zoom con rueda o
+                                    // lupas el campo muestra el valor real
+                                    text <=> root.zoom-label;
                                     color: root.c-fg; font-size: 12px;
                                     horizontal-alignment: center; vertical-alignment: center;
-                                    accepted => { root.zoom-text(self.text); }
+                                    accepted => { root.zoom-text(self.text); self.clear-focus(); }
                                 }
                             }
                             Rectangle {
@@ -1228,14 +1280,24 @@ export component AppWindow inherits Window {
                             // no se puede colocar: esto es un chip propio que
                             // se mueve con la pagina.
                             if (ta.has-hover): chip := Rectangle {
-                                x: 0px; y: -30px;
-                                width: min(300px, chip-txt.width + 12px);
-                                height: 26px;
+                                // ancho fijo y wrap: el comentario largo se
+                                // lee entero (antes se cortaba)
+                                // dentro del area visible del visor (si la
+                                // pagina es mas ancha que la ventana, el
+                                // comentario se salia y se cortaba)
+                                x: max(root.view-x + 4px - n.x * 1px,
+                                       min(0px, root.view-x + root.view-w - n.x * 1px - self.width - 4px));
+                                // arriba; si la nota esta pegada al borde
+                                // superior visible, debajo
+                                y: n.y * 1px - root.view-y < chip-txt.height + 18px ? parent.height + 4px : -chip-txt.height - 14px;
+                                width: min(340px, root.img-w * 1px - 8px);
+                                height: chip-txt.height + 10px;
                                 background: #1b1b1be8; border-radius: 4px;
                                 border-width: 1px; border-color: #ffffff40;
                                 chip-txt := Text {
-                                    x: 6px; y: (parent.height - self.height) / 2;
+                                    x: 6px; y: 5px; width: parent.width - 12px;
                                     text: n.text; color: #ffffff; font-size: 12px;
+                                    wrap: word-wrap;
                                 }
                             }
                         }
@@ -1399,12 +1461,12 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         MiniBtn {
-                            label: root.dlg-kind == 1 ? "Cancelar" : "Ahora no";
+                            label: root.dlg-kind == 0 ? "Ahora no" : "Cancelar";
                             bg: root.c-pill; fg: root.c-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(false); }
                         }
                         MiniBtn {
-                            label: root.dlg-kind == 1 ? "Abrir" : "Sí, crear";
+                            label: root.dlg-kind == 1 ? "Abrir" : (root.dlg-kind == 2 ? "Sí, limpiar" : "Sí, crear");
                             bg: root.c-accent; fg: root.c-accent-fg; bd: root.is-dark ? root.c-line : transparent;
                             clicked => { root.dlg-answer(true); }
                         }

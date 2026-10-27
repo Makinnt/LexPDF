@@ -105,7 +105,11 @@ Flujos:
   palabra entera (1662 px) — medido contando píxeles. El test lo comprueba.
 - **Herramientas** (barra superior): 0 normal · 1 nota · 2 resaltar (arrastrar) ·
   3 borrar. El borrado se puede hacer desde la barra (pinchar el marcador) o
-  desde la card del error (botón "Borrar", solo si tiene anotación).
+  desde la card del error (botón "Borrar", solo si tiene anotación); el aviso
+  al entrar en modo borrar recuerda que se sale pulsando el icono otra vez.
+  El campo de zoom va con `text <=> root.zoom-label` (en un solo sentido se
+  queda con el texto viejo al cambiar el zoom con rueda o lupas) y hace
+  `clear-focus()` al aceptar.
   **GOTCHA**: en modo resaltar hay que poner `interactive: false` al `Flickable`
   de la página, si no el scroll se come el arrastre del rectángulo.
   El resaltado libre puede ser **por área** (el rectángulo) o **por texto**
@@ -129,6 +133,9 @@ Flujos:
   trivial ahora porque `on_open_settings` ya no crea nada: solo rellena los
   props `p-*` y pone `ovl = 1`.
   Se guardan en `~/.config/lexpdf/settings.json` (0600).
+  **GOTCHA layout**: el contenido va en un `Flickable` y la fila
+  Guardar/Cerrar queda **fija al pie** (fuera del Flickable): si los botones
+  van dentro del contenido, con el panel corto se salen de la ventana.
 - **Capas apiladas Ajustes > Acerca de > Licencias** (todas DENTRO de la
   ventana principal): Slint 1.18 no tiene ventanas modales. AppWindow lleva
   `ovl` (0 nada · 1 Ajustes · 2 Acerca · 3 Licencias); cada capa es un `if
@@ -151,6 +158,8 @@ Flujos:
   `los_textos_de_licencia_son_los_correctos` + `every_listed_license_file_exists`
   lo garantizan) y el repo (clicable → `xdg-open`/`open`/`cmd start`). OJO con
   los repos reales: pdfium-render=ajrcarey, lopdf=J-F-Liu, rfd=PolyMeilex.
+  Donde la dependencia es dual (MIT **o** Apache-2.0) se **elige MIT** y se
+  lista solo ese texto: no vale dejar "MIT o Apache-2.0" sin elegir.
   Los datos los alimenta la función Rust `lic_select()` y el
   callback `open-licenses()` de AppWindow. `asset_file()` los busca junto al
   exe (`licenses/`), en el AppImage (`../share/lexpdf/licenses/`) o en el repo
@@ -161,21 +170,45 @@ Flujos:
   **GOTCHA**: el texto de la licencia necesita un alto explícito
   (`cur-h`, estimado en Rust con `license_height()`): si el `Flickable` calcula
   el alto del contenido solo, el texto se sale de la ventana y no se desliza.
-- **GOTCHA slint#407 (cards)**: `Flickable` + `for` NO computa
-  `content-height` (bug oficial de Slint). Las cards llevan `h` (alto
-  estimado en Rust con `card_h()`, estilo `license_height()`) y el
-  `Flickable` recibe el sumatorio en `errors-h` (+62 si el editor de
-  comentario está abierto); sin eso la lista no desliza y el layout reparte
-  el alto fijo como hueco muerto dentro de las cards.
+- **GOTCHA slint#407 (cards)**: `Flickable` no calcula `content-height`
+  cuando el contenido es un `for`; el pase `flickable.rs` lo deriva del
+  **`min-height` del layout hijo** (y `layout.rs` deriva `min-height` de un
+  `height` local, así que fijarlo a un número equivale a mentirle al scroll).
+  Solución: **no poner `height` ni `min-height` al `VerticalLayout`** — su
+  `min-height` automática es la suma de las cards y acierta sola. Las cards
+  miden **alto natural** y llevan `vertical-stretch: 0` (sin él, con pocos
+  resultados se estiran hasta llenar el Flickable). Antes había una estimación
+  en Rust (`errors-h`/`card_h()`, +30%): se eliminó porque en Windows se
+  quedaba corta (última card inalcanzable).
+- **GOTCHA botones de la card**: `visible: false` **y también un `if`** dejan
+  la columna reservada (el botón que queda se estira a medias → hueco raro) y
+  con 3-4 `MiniBtn` en una fila el layout los encoge y sale "Añadir comen…".
+  La card usa 2x2 fijo (Omitir+Añadir comentario / Obs. gramatical+Borrar) y
+  el "Borrar" sin anotación se pinta con `opacity: 0.4` y no hace nada.
+  Todos los MiniBtn de la card (y el de Agrupar/Desagrupar) llevan
+  `width: 169px` (media card menos spacing): con solo `stretch: 1` el base es
+  el ancho PREFERIDO del texto y las columnas salían desiguales.
+  En el pie de Ajustes, "Guardar" necesita `width` explícito (90px): sin él,
+  el Rectangle se queda en su ancho preferido (~0, su Text usa parent.width)
+  y el botón salía aplastado.
+  **GOTCHA ancho**: un layout dentro de un `Rectangle` NO hereda su ancho
+  (se queda en el preferido y TODO sale elidido: "Añadir come…", "…"). La
+  sidebar mide 400 fijos, así que la card va a **`width: 360px`**, el
+  `HorizontalLayout` de dentro a **360px** y el `VerticalLayout` a **355px**
+  (5px de la franja). Con `width: parent.width` + `Flickable` hay binding
+  loop (`content-width`), por eso son números.
+  Alturas con holgura para las fuentes de Windows: palabra 24px, meta 19px,
+  leyenda 36px (2 líneas), sugerencia 19px, `MiniBtn` 25px (con 22 se
+  cortaba la parte de arriba).
 - **Toasts/avisos**: la pastilla usa `toast-pos` (0 arriba por defecto ·
   1 abajo, seleccionable en Ajustes, campo `Settings.toast_pos`). La ✕ es el
   glifo `IconClose` de Material Icons: el carácter "✕" en Text NO existe en
   las fuentes base de Windows y no se dibuja.
-- **Icono de ventana/corner**: Windows no lo pone del recurso del exe por
-  su cuenta (winit registra la clase con `hIcon: 0` y Slint no llama
-  `set_window_icon`): se pone con la propiedad nativa **`icon` del
-  `Window`** de Slint (`icon: @image-url(...)`; el backend winit llama
-  set_window_icon + set_taskbar_icon). El `.ico` de `winresource` en
+- **Icono de ventana/corner**: ya está en `AppWindow`:
+  `icon: @image-url("../assets/logo.png")` (el backend winit llama
+  set_window_icon + set_taskbar_icon). Windows no lo toma del recurso del exe
+  por su cuenta (winit registra la clase con `hIcon: 0`), así que **sin esa
+  propiedad la esquina sale en blanco**. El `.ico` de `winresource` en
   build.rs solo sirve para Explorer/accesos directos.
 - **GOTCHA `err_anno`**: el mapa error -> anotación guarda la **clave**
   (página + rect), NO el índice en `doc_notes`: al borrar una nota los índices
@@ -202,7 +235,10 @@ Flujos:
   imagen de la página (se mueve con el scroll) y aparece con
   `if (ta.has-hover)` (el `TouchArea` de la nota). Ojo: `has-hover` es del
   `TouchArea`, no del `Rectangle`; en Slint 1.18 no hay `MouseArea` ni
-  `pointer-event`.
+  `pointer-event`. El texto va **entero** (Rust ya no lo corta a 45 chars) y
+  el chip hace `wrap` a 340px con alto automático; su `x`/`y` se limitan al
+  área visible con `root.view-x`/`root.view-y`/`root.view-w`, si no se sale
+  de la ventana cuando la página es más ancha que el visor.
   **GOTCHA**: el `TouchArea` de esas zonas solo está activo en modo normal y
   borrar (`enabled: root.tool-mode == 0 || root.tool-mode == 3`): si está
   activo siempre, se come el arrastre del resaltado libre y el clic de la nota.
@@ -231,8 +267,10 @@ Flujos:
 - `Flickable + VerticalLayout + for` para la lista (no `ListView` de std-widgets).
 - Cards: franja de color por gravedad + palabra + tipo/gravedad/pág +
   descripción ES/EN + sugerencias LT (`No hay sugerencias` si vacío) +
-  Omitir/Restaurar (cascada por solape) + comentario + obs. gramatical
-  (editor inline) + 2 desplegables `DropSel` Tipo/Gravedad + grupo ×5+.
+  Omitir/Restaurar (cascada por solape) + "Añadir comentario" + obs. gramatical
+  (editor inline) + 2 desplegables `DropSel` Tipo/Gravedad + grupo ×5+
+  ("Desagrupar"/"Agrupar", `MiniBtn` con `width: 100px` y
+  `horizontal-stretch: 0`: al ser el único de su fila se estiraba entera).
 - Extracción = unión simple de boxes por carácter, sin shaping tipográfico.
 - No hay reemplazo de texto en el PDF (cirugía redact+reescribir, fuera del mínimo);
   las sugerencias son de referencia, como en `index.html`.
@@ -269,6 +307,19 @@ ortografía, morado sintaxis), zoom ×1.25 (0.5–3.0) + nota libre con botón `
  sección Recientes → `open_doc`); `build.rs` descarga LT ~240MB a `assets/lt/`
  gitignoreado —requiere red en build y Java 17+ en runtime—; medido: arranque
 -`~4s, ~80ms/check, ~650MB RAM). `cargo test` rápido (sin motores pesados en tests).
+Release actual: **v0.2.5 marcada como prerelease "(experimental)"** (sin bump de
+versión): exe de Windows + AppImage. Los fixes visuales viven en `experimental`.
+Validado en Windows con 1984.pdf (24/10/2026): la última card YA se ve entera.
+**GOTCHA cards cortadas (causa raíz)**: la sidebar tiene `alignment: start`
+(los `vertical-stretch` se IGNORAN con alignment) y el `Flickable` de
+resultados tenía `height: 420px` FIJO → con historial + textos de estado el
+420px terminaba POR DEBAJO del borde de la ventana y esa banda nunca se veía
+(el scroll ocurre dentro del Flickable). Fix: quitar `alignment: start`,
+quitar el alto fijo y dar `vertical-stretch: 1` al Flickable (come el resto);
+los `Text` con wrap y sin alto fijo de la sidebar llevan `vertical-stretch: 0`
+para no repartirse el espacio con él (en Slint solo crecen los de `max > pref`;
+los de alto fijo nunca crecen). Pendiente de validar en Windows: card única
+demasiado alta y leyenda "Añadir comentario" también en el resaltado libre.
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)
@@ -308,3 +359,20 @@ java en `$JAVA_BIN` → `jre\` junto al exe → `PATH`.
 Linux/AppImage: `installer/linux/` (`stage-appimage.sh` → AppDir + AppRun con
 `LT_HOME`/`JAVA_BIN`/`PDFIUM_DYNAMIC_LIB_PATH`); releases vía `release.yml`
 (con smoke test LT real y jlink incl. `jdk.httpserver`).
+
+**GOTCHA release (re-tag)**: re-pushear el mismo tag deja la release existente
+en **draft**, y el edit de `softprops/action-gh-release` falla contra ese
+estado (el job Linux muere en "Release con AppImage"; Windows pasa porque
+llega después). Por eso `release.yml` **borra la release previa**
+(`gh release delete "$GITHUB_REF_NAME" --yes || true`) antes de publicar.
+Ciclo experimental sin bump: `git push origin :refs/tags/vX` → `git tag -f` →
+push, y el paso de release lleva `prerelease: true` +
+`name: Release vX (experimental)`. Se **verifica por API** (no hay token para
+leer logs): `releases` debe traer los dos assets y `prerelease: true`.
+OJO: si borras el tag y no recreas la release, GitHub la deja en draft y no
+aparece en la página de Releases (ni como "Latest", por ser prerelease).
+
+**Ramas**: los fixes visuales se hacen en `experimental` (se re-etiqueta el
+mismo `vX`); `main` va **por detrás** a propósito (commit del fix + `git
+revert`, sin reescribir historia). No mover los fixes a `main` hasta que el
+usuario valide el exe.
