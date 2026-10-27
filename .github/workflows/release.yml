@@ -191,9 +191,17 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
-          name: Release ${{ github.ref_name }} (experimental)
+          name: Release ${{ github.ref_name }}
           body: |
+            ## Novedades de la v0.2.5
+
+            - **Lista de resultados arreglada en Windows**: el scroll llega hasta la última card con todos sus botones (antes el área de resultados se salía por debajo del borde de la ventana y ese trozo nunca se veía).
+            - **Botones de las cards uniformes**: filas en mitades iguales (Omitir / Añadir comentario / Obs. gramatical / Borrar / Agrupar).
+            - **"Guardar" de Ajustes** ya no sale aplastado.
+            - **Limpiar historial**: nuevo botón junto a "Recientes", con diálogo de confirmación.
+            - **Chip de comentario** de las notas: texto entero, con wrap y limitado al área visible.
+            - **Tests arreglados en Windows** (fixture a temp_dir): 24/24 en verde.
+
             ## Novedades de la v0.2.0
 
             - **Resaltados y comentarios de verdad**: se puede resaltar una palabra o un texto arrastrando encima y escribirle un comentario. El resaltado se guarda como anotación Highlight real del PDF (con /QuadPoints, se ve en cualquier lector) y el comentario, dentro.
