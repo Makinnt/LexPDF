@@ -669,7 +669,7 @@ fn scan_tick(ui: &AppWindow, st: &Rc<RefCell<State>>) -> bool {
         s.jobs_total += launched;
         refresh_progress(ui, &s);
     }
-    if launched > 0 {
+    if launched > 0 || dead {
         push_errs(ui, st);
     }
     false

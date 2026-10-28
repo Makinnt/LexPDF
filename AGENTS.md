@@ -329,6 +329,15 @@ los `Text` con wrap y sin alto fijo de la sidebar llevan `vertical-stretch: 0`
 para no repartirse el espacio con él (en Slint solo crecen los de `max > pref`;
 los de alto fijo nunca crecen). Pendiente de validar en Windows: card única
 demasiado alta y leyenda "Añadir comentario" también en el resaltado libre.
+**GOTCHA "no salen las cards"**: la barra de escaneo, el texto de progreso y
+todo el bloque de Resultados (título, cuenta, filtros y el `Flickable`) van en
+bloques `if (...)` — con `visible: false` seguían reservando alto y dejaban un
+hueco blanco de ~47 px entre Recientes y Resultados. Y cuando no hay ninguna
+card se pinta un estado vacío explícito (`if (has-doc && errors.length == 0)`)
+con el motivo (`spell-status`): antes, con el motor muerto, `push_errs` no
+llegaba a correr y la zona quedaba en blanco sin explicar nada (la línea vieja
+"Motor: no disponible" se había quitado en 0.2.6). Por eso `scan_tick` llama a
+`push_errs` también en la rama `lt_dead`.
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)

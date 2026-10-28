@@ -899,31 +899,31 @@ export component AppWindow inherits Window {
                 Rectangle { height: 1px; background: root.c-line; }
 
                 // barra de escaneo: izquierda a derecha, verde
-                Rectangle {
+                // (bloques `if`, no `visible`: oculto sigue reservando alto y
+                // dejaba un hueco en blanco de ~47px entre Recientes y Resultados)
+                if (root.scanning): Rectangle {
                     height: 10px;
                     background: root.c-pill; border-radius: 5px;
-                    visible: root.scanning;
                     Rectangle {
                         x: 0;
                         width: parent.width * root.scan-progress / 100;
                         background: #43a047; border-radius: 5px;
                     }
                 }
-                Text {
+                if (root.scanning): Text {
                     text <=> root.scan-text; font-size: 12px; color: root.c-dim;
-                    visible: root.scanning; vertical-stretch: 0;
+                    vertical-stretch: 0;
                 }
 
                 // resultados
-                Text { text: "Resultados"; font-size: 14px; font-weight: 700; color: root.c-fg; }
-                Text {
+                if (root.has-doc): Text { text: "Resultados"; font-size: 14px; font-weight: 700; color: root.c-fg; }
+                if (root.has-doc): Text {
                     text: root.word-count + " palabras · " + root.spell-status;
                     font-size: 13px; font-weight: 700; color: root.c-fg;
-                    visible: root.has-doc;
+                    overflow: elide;
                 }
-                HorizontalLayout {
+                if (root.has-doc): HorizontalLayout {
                     spacing: 6px;
-                    visible: root.has-doc;
                     DropSel {
                         label: "Tipo";
                         opts: ["Todas", "Ortografía", "Sintaxis"];
@@ -943,13 +943,12 @@ export component AppWindow inherits Window {
                         picked(i) => { root.sev-set(i); }
                     }
                 }
-                Flickable {
+                if (root.has-doc && root.errors.length > 0): Flickable {
                     // ocupa el espacio que queda en la sidebar (antes 420px
                     // fijos: se salían por debajo del borde de la ventana y
                     // la última card nunca se veía completa)
                     vertical-stretch: 1;
                     horizontal-stretch: 1;
-                    visible: root.has-doc;
                     // slint#407: NO poner height/min-height al layout — el
                     // content-height sale de su min-height AUTOMÁTICA (suma de
                     // las cards). Fijarlo a un número desfasa el scroll.
@@ -1099,12 +1098,19 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Text {
+                // estado vacío explícito: sin esto, "ninguna card" y "roto" se
+                // ven igual; aquí sale el motivo (escaneando / sin motor / sin errores)
+                if (root.has-doc && root.errors.length == 0): Text {
+                    text: root.scanning ? "Escaneando…" : root.spell-status;
+                    font-size: 13px; color: root.c-dim; wrap: word-wrap;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    vertical-stretch: 1;
+                }
+                if (!root.has-doc): Text {
                     text: "El visor PDF aparecerá a la derecha cuando abras un documento.";
                     font-size: 13px; color: root.c-dim; wrap: word-wrap;
                     horizontal-alignment: center;
                     vertical-stretch: 0;
-                    visible: !root.has-doc;
                 }
                 // pista: las notas ya no se listan, se ven al pasar el ratón por el marcador
                 if (root.page-notes.length > 0): Text {
