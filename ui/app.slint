@@ -777,9 +777,6 @@ export component AppWindow inherits Window {
     // del contenedor (posición absoluta) y no reparte el espacio con el layout.
     Rectangle {
     width: 100%; height: 100%;
-    // suelo de tamaño (sustituye al min-* de la Window, que no puede ir con
-    // width/height fijos)
-    min-width: 900px; min-height: 600px;
     HorizontalLayout {
         // Sidebar (400px como index.html)
         Rectangle {
