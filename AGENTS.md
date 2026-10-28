@@ -345,6 +345,14 @@ llegaba a correr y la zona quedaba en blanco sin explicar nada (la línea vieja
 su alto máximo es libre y el layout les da todo el espacio sobrante → aparecía
 un hueco en blanco enorme entre "Sube un PDF…" y "Recientes" (solo se veía sin
 documento, porque con documento el `Flickable` se queda el sobrante).
+**GOTCHA tamaño de ventana**: la `Window` NO lleva `min-width/min-height` sino
+`width: 1200px; height: 800px` fijos (el suelo de 900×600 va en el `Rectangle`
+wrapper). Motivo: Slint redimensiona la ventana cuando cambian las
+restricciones del layout, así que al borrar el historial (desaparece ese
+bloque) la app se encogía al mínimo y se veía "cortada a la mitad". Con
+`width`/`height` fijos el usuario sigue redimensionando (sin volver al tamaño
+fijo) y el contenido ya no manda. `width` + `min-width` en la Window no
+compilan juntos.
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)
