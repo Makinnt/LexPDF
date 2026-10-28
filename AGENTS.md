@@ -340,6 +340,11 @@ con el motivo (`spell-status`): antes, con el motor muerto, `push_errs` no
 llegaba a correr y la zona quedaba en blanco sin explicar nada (la línea vieja
 "Motor: no disponible" se había quitado en 0.2.6). Por eso `scan_tick` llama a
 `push_errs` también en la rama `lt_dead`.
+**GOTCHA hueco sin documento**: los `Text` con `wrap` de la sidebar (status,
+"El visor aparecerá…" y la pista de notas) necesitan `height` explícito; sin él
+su alto máximo es libre y el layout les da todo el espacio sobrante → aparecía
+un hueco en blanco enorme entre "Sube un PDF…" y "Recientes" (solo se veía sin
+documento, porque con documento el `Flickable` se queda el sobrante).
 Licencia proyecto: GPL-3.0-only (la exige Slint enlazado; `pdfium-render` MIT/Apache es compatible). Pdfium: BSD + third-party en `assets/pdfium/licenses/`.
 
 ## Modelo de amenazas (qué sale del PC)

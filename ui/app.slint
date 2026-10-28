@@ -864,7 +864,7 @@ export component AppWindow inherits Window {
                         TouchArea { width: parent.width; height: parent.height; clicked => { root.lang-set(i); } }
                     }
                 }
-                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0; }
+                Text { text <=> root.status; font-size: 13px; color: root.c-dim; wrap: word-wrap; height: 34px; vertical-stretch: 0; }
 
                 if (root.history.length > 0): VerticalLayout {
                     spacing: 4px;
@@ -1110,13 +1110,13 @@ export component AppWindow inherits Window {
                     text: "El visor PDF aparecerá a la derecha cuando abras un documento.";
                     font-size: 13px; color: root.c-dim; wrap: word-wrap;
                     horizontal-alignment: center;
-                    vertical-stretch: 0;
+                    height: 36px; vertical-stretch: 0;
                 }
                 // pista: las notas ya no se listan, se ven al pasar el ratón por el marcador
                 if (root.page-notes.length > 0): Text {
                     text: "Notas: " + root.page-notes.length + " en esta página · "
                         + root.note-total + " en el documento · pásale el ratón por los marcadores ámbar";
-                    font-size: 11px; color: root.c-dim; wrap: word-wrap; vertical-stretch: 0;
+                    font-size: 11px; color: root.c-dim; wrap: word-wrap; height: 32px; vertical-stretch: 0;
                 }
             }
         }
