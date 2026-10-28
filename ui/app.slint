@@ -640,10 +640,13 @@ global Pal {
 export component AppWindow inherits Window {
     title: "LexPDF";
     icon: @image-url("../assets/logo.png");
-    // tamaño FIJO: sin esto la ventana encoge cuando el contenido encoge (al
-    // borrar el historial la app se quedaba "cortada" al mínimo)
-    width: 1200px;
-    height: 800px;
+    // suelo de tamaño = tamaño de apertura (Slint 1.18 abre la ventana en el
+    // mínimo del contenido): sin esto la ventana encogía al borrar el historial
+    // y se veía "cortada". OJO: width/height aquí fijan la ventana y Windows
+    // desactiva maximizar; preferred-* los ignora el layout; set_size desde
+    // Rust también se ignora. Así que el suelo ES el tamaño de apertura.
+    min-width: 1200px;
+    min-height: 800px;
     init => { root.win-w = self.width; root.win-h = self.height; }
     changed width => { root.win-w = self.width; }
     changed height => { root.win-h = self.height; }

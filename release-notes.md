@@ -1,7 +1,7 @@
 ## Novedades de la v0.2.6
 
 - **La lista de resultados ya no se queda en blanco**: si el escaneo acaba sin fichas se ve el motivo ("Escaneando…", "Sin revisión: motor apagado o sin runtime java", "Sin errores") en vez de una zona vacía. Y desaparecieron los huecos en blanco de la barra lateral: entre "Recientes" y "Resultados" (los widgets ocultos reservaban sitio) y el enorme que salía al abrir la app sin documento entre "Sube un PDF" y "Recientes".
-- **La ventana ya no se encoge sola**: el tamaño dependía del contenido, así que al borrar el historial (desaparecía ese bloque) la app se encogía al mínimo y se veía cortada a la mitad. Ahora abre a 1200×800 y se redimensiona como cualquier ventana, sin que el contenido la encoja.
+- **La ventana ya no se encoge sola**: el tamaño dependía del contenido, así que al borrar el historial (desaparecía ese bloque) la app se encogía y se veía cortada a la mitad. Ahora abre a 1200×800 y de ahí no baja; se puede maximizar, restaurar y anclar como cualquier ventana.
 - **El motor va incluido**: el instalador lleva su propio runtime java (`jre/`) y los diccionarios (`lt/`); el usuario no tiene que instalar Java. Si ese runtime falta, la app lo dice con esas palabras.
 - **Borrar ya no se equivoca de resaltado**: la ficha sabe qué anotación es la suya por página y posición, no por un índice que cambiaba al reescanear o abrir otro PDF. Antes podía borrar el comentario de otra palabra.
 - **Encender el motor en Ajustes funciona**: al volver a activar la revisión se arranca el sidecar de LanguageTool y el escaneo prosigue. Antes la barra se quedaba en "Cargando diccionarios…" para siempre. Al apagarlo, el proceso Java se cierra.
