@@ -35,7 +35,9 @@ PDFIUM_DYNAMIC_LIB_PATH=...      # alternativa a tener la lib junto al exe
 `build.rs` copia `assets/pdfium/{libpdfium.so,pdfium.dll}` (según SO) y
 descarga+descomprime LT a `assets/lt/` (gitignoreado, ~240MB zip).
 En runtime LT se busca en: `$LT_HOME` → junto al exe → `assets/lt/`.
-Java 17+ requerido (sidecar). Los `.tgz`/`.zip` originales **no** se commitean.
+Java: el instalador/AppImage traen su propio runtime (`jre/`, jlink con
+`jdk.httpserver`); en desarrollo se usa `$JAVA_BIN` o el `java` del PATH.
+Los `.tgz`/`.zip` originales **no** se commitean.
 
 ## Arquitectura lógica (`src/main.rs`)
 

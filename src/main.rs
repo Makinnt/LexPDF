@@ -574,7 +574,7 @@ fn push_errs(ui: &AppWindow, st: &Rc<RefCell<State>>) {
         // ventana en blanco con causa: sin motor no hay nada que listar
         let s = st.borrow();
         if s.lt_dead {
-            ui.set_spell_status("Sin motor: instala Java 17+ o coloca lt/ junto al programa.".into());
+            ui.set_spell_status("Sin revisión: motor apagado o sin runtime java.".into());
         } else if !s.scan_queue.is_empty() && s.scan_pos >= s.scan_queue.len() {
             if s.lt_ready && !s.syn_received {
                 ui.set_spell_status("Sin errores (LT no devolvió ninguno).".into());
@@ -1826,7 +1826,7 @@ fn start_lt(st: &Rc<RefCell<State>>) {
     };
     std::thread::spawn(move || {
         let Some(dir) = lt_dir() else {
-            let _ = tx.send(SpellEvent::LtFail("no se encontró assets/lt (¿falló la descarga en build?)".into()));
+            let _ = tx.send(SpellEvent::LtFail("no encuentro los diccionarios (carpeta lt/ junto al programa)".into()));
             return;
         };
         let jar = dir.join("languagetool-server.jar");
@@ -1860,7 +1860,7 @@ fn start_lt(st: &Rc<RefCell<State>>) {
         let mut child = match child {
             Ok(c) => c,
             Err(_) => {
-                let _ = tx.send(SpellEvent::LtFail("java no encontrado (se necesita Java 17+)".into()));
+                let _ = tx.send(SpellEvent::LtFail("falta el runtime java (jre/ junto al programa o JAVA_BIN)".into()));
                 return;
             }
         };
